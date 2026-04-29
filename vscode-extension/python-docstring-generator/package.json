@@ -1,0 +1,87 @@
+{
+  "name": "python-docstring-generator",
+  "displayName": "Python Docstring Generator",
+  "description": "Generate Python docstrings locally using Ollama models.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.116.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:python-docstring-generator.generateDocstring",
+    "onCommand:python-docstring-generator.checkOllamaConnection"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "python-docstring-generator.generateDocstring",
+        "title": "Generate Python Docstring",
+        "category": "Python Docstring Generator"
+      },
+      {
+        "command": "python-docstring-generator.checkOllamaConnection",
+        "title": "Check Ollama Connection",
+        "category": "Python Docstring Generator"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "python-docstring-generator.generateDocstring",
+          "when": "editorLangId == python",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Python Docstring Generator",
+      "properties": {
+        "pythonDocstringGenerator.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL of the local Ollama server."
+        },
+        "pythonDocstringGenerator.model": {
+          "type": "string",
+          "default": "qwen2.5-coder:1.5b",
+          "description": "Name of the local Ollama model used for docstring generation."
+        },
+        "pythonDocstringGenerator.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature used by Ollama."
+        },
+        "pythonDocstringGenerator.numPredict": {
+          "type": "integer",
+          "default": 256,
+          "minimum": 32,
+          "maximum": 4096,
+          "description": "Maximum number of tokens Ollama should generate."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.116.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.56.1",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}

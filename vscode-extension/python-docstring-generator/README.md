@@ -27,8 +27,8 @@ This extension contributes the following settings:
 
 - `pythonDocstringGenerator.ollamaUrl`: Ollama base URL. Default: `http://localhost:11434`
 - `pythonDocstringGenerator.model`: Ollama model name. Default: `qwen2.5-coder:1.5b`
-- `pythonDocstringGenerator.temperature`: Generation temperature. Default: `0.2`
-- `pythonDocstringGenerator.numPredict`: Maximum generated tokens. Default: `256`
+- `pythonDocstringGenerator.temperature`: Generation temperature from `0` to `2`. Default: `0.2`
+- `pythonDocstringGenerator.numPredict`: Positive maximum generated token count. Default: `256`
 
 ## Usage
 
@@ -36,6 +36,8 @@ This extension contributes the following settings:
 2. Open a Python file in VS Code.
 3. Select a complete Python function with a single-line `def` or `async def` signature.
 4. Run `Python Docstring Generator: Generate Python Docstring`.
+
+The extension checks for an existing docstring in the selected function and skips insertion if the first meaningful line after the function signature is already a triple-quoted string.
 
 Example input:
 

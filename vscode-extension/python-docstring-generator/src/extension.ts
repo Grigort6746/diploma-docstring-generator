@@ -25,6 +25,13 @@ interface OllamaTagsResponse {
 	}>;
 }
 
+class UserFacingError extends Error {
+	public constructor(message: string) {
+		super(message);
+		this.name = 'UserFacingError';
+	}
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel(outputChannelName);
 
@@ -45,6 +52,8 @@ export function deactivate() {
 }
 
 async function runGenerateDocstringCommand(): Promise<void> {
+	log('Generate docstring command started.');
+
 	const editor = vscode.window.activeTextEditor;
 
 	if (!editor) {
@@ -73,19 +82,18 @@ async function runGenerateDocstringCommand(): Promise<void> {
 
 	const signatureDocumentLine = editor.selection.start.line + signature.lineOffset;
 
-	if (hasExistingDocstring(editor.document, signatureDocumentLine)) {
-		vscode.window.showWarningMessage('The selected function already appears to contain a docstring.');
+	if (hasExistingDocstring(selectedCode, signature.lineOffset)) {
+		vscode.window.showWarningMessage('This function already appears to have a docstring.');
 		return;
 	}
 
-	const config = getConfiguration();
-	const prompt = generatePrompt(selectedCode.trim());
-
-	log('Selected Python code:');
-	log(selectedCode);
-	log(`Using Ollama model "${config.model}" at ${config.ollamaUrl}.`);
-
 	try {
+		const config = getConfiguration();
+		const prompt = generatePrompt(selectedCode.trim());
+
+		log(`Selected code length: ${selectedCode.length} characters.`);
+		log(`Using Ollama model "${config.model}" at ${config.ollamaUrl}.`);
+
 		const generatedText = await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
@@ -95,10 +103,13 @@ async function runGenerateDocstringCommand(): Promise<void> {
 			async () => callOllama(config, prompt)
 		);
 
+		log('Raw model response before normalization:');
+		log(generatedText);
+
 		const docstringContent = normalizeGeneratedDocstring(generatedText);
 
 		if (!docstringContent) {
-			throw new Error('The model returned an empty docstring.');
+			throw new UserFacingError('The model returned an empty docstring.');
 		}
 
 		const signatureIndent = getLineIndent(editor.document.lineAt(signatureDocumentLine).text) || signature.indent;
@@ -106,9 +117,13 @@ async function runGenerateDocstringCommand(): Promise<void> {
 		const insertionText = formatDocstringForInsertion(docstringContent, bodyIndent);
 		const insertionPosition = new vscode.Position(signatureDocumentLine + 1, 0);
 
-		await editor.edit((editBuilder) => {
+		const applied = await editor.edit((editBuilder) => {
 			editBuilder.insert(insertionPosition, insertionText);
 		});
+
+		if (!applied) {
+			throw new UserFacingError('Could not insert docstring into the editor.');
+		}
 
 		vscode.window.showInformationMessage('Python docstring generated and inserted.');
 		log('Generated docstring:');
@@ -119,9 +134,12 @@ async function runGenerateDocstringCommand(): Promise<void> {
 }
 
 async function runCheckOllamaConnectionCommand(): Promise<void> {
-	const config = getConfiguration();
+	log('Check Ollama connection command started.');
 
 	try {
+		const config = getConfiguration();
+		log(`Checking Ollama at ${config.ollamaUrl} with model "${config.model}".`);
+
 		const modelNames = await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
@@ -137,7 +155,7 @@ async function runCheckOllamaConnectionCommand(): Promise<void> {
 		}
 
 		vscode.window.showWarningMessage(
-			`Ollama is running, but model "${config.model}" was not found. Install it or choose another model in settings.`
+			`Model "${config.model}" is not installed or not available in Ollama.`
 		);
 	} catch (error) {
 		handleCommandError('Could not connect to Ollama.', error);
@@ -146,26 +164,74 @@ async function runCheckOllamaConnectionCommand(): Promise<void> {
 
 function getConfiguration(): ExtensionConfiguration {
 	const configuration = vscode.workspace.getConfiguration('pythonDocstringGenerator');
+	const ollamaUrlValue = configuration.get<unknown>('ollamaUrl', 'http://localhost:11434');
+	const modelValue = configuration.get<unknown>('model', 'qwen2.5-coder:1.5b');
+	const temperatureValue = configuration.get<unknown>('temperature', 0.2);
+	const numPredictValue = configuration.get<unknown>('numPredict', 256);
+
+	const ollamaUrl = typeof ollamaUrlValue === 'string' ? ollamaUrlValue.trim() : '';
+	const model = typeof modelValue === 'string' ? modelValue.trim() : '';
+
+	if (!ollamaUrl) {
+		throw new UserFacingError('Ollama URL is empty. Check Python Docstring Generator settings.');
+	}
+
+	if (!isHttpUrl(ollamaUrl)) {
+		throw new UserFacingError('Ollama URL is invalid. Check Python Docstring Generator settings.');
+	}
+
+	if (!model) {
+		throw new UserFacingError('Model name is empty. Check Python Docstring Generator settings.');
+	}
+
+	if (
+		typeof temperatureValue !== 'number' ||
+		!Number.isFinite(temperatureValue) ||
+		temperatureValue < 0 ||
+		temperatureValue > 2
+	) {
+		throw new UserFacingError('temperature must be a number between 0 and 2.');
+	}
+
+	if (
+		typeof numPredictValue !== 'number' ||
+		!Number.isInteger(numPredictValue) ||
+		numPredictValue <= 0
+	) {
+		throw new UserFacingError('numPredict must be a positive integer.');
+	}
 
 	return {
-		ollamaUrl: configuration.get<string>('ollamaUrl', 'http://localhost:11434').trim(),
-		model: configuration.get<string>('model', 'qwen2.5-coder:1.5b').trim(),
-		temperature: configuration.get<number>('temperature', 0.2),
-		numPredict: configuration.get<number>('numPredict', 256)
+		ollamaUrl,
+		model,
+		temperature: temperatureValue,
+		numPredict: numPredictValue
 	};
+}
+
+function isHttpUrl(value: string): boolean {
+	try {
+		const parsedUrl = new URL(value);
+		return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+	} catch {
+		return false;
+	}
 }
 
 function generatePrompt(code: string): string {
 	return [
-		'Generate a Google-style Python docstring for the following function.',
+		'Generate only a Python docstring for the following function.',
 		'',
 		'Requirements:',
+		'- Use Google-style format.',
 		'- Return only the docstring.',
 		'- Do not include Markdown.',
 		'- Do not repeat the code.',
-		'- Document all arguments.',
+		'- Document all visible arguments.',
 		'- Include Returns if the function returns a value.',
 		'- Include Raises only if the function clearly raises exceptions.',
+		'- Do not invent behavior that is not visible from the function body or signature.',
+		'- Be concise but informative.',
 		'',
 		'Python function:',
 		code
@@ -189,20 +255,24 @@ async function callOllama(config: ExtensionConfiguration, prompt: string): Promi
 			}
 		})
 	}, 60_000);
+	const body = await readResponseText(response);
 
 	if (!response.ok) {
-		const body = await readResponseText(response);
-		throw new Error(formatOllamaHttpError(response.status, body, config.model));
+		log(`Ollama /api/generate returned HTTP ${response.status}.`);
+		log(`Response body: ${body}`);
+		throw new UserFacingError(formatOllamaHttpError(response.status, body, config.model));
 	}
 
-	const data = await response.json() as OllamaGenerateResponse;
+	const data = parseJsonResponse<OllamaGenerateResponse>(body, 'Ollama /api/generate');
 
 	if (typeof data.error === 'string' && data.error.trim()) {
-		throw new Error(`Ollama returned an error: ${data.error.trim()}`);
+		log(`Ollama /api/generate error field: ${data.error.trim()}`);
+		throw new UserFacingError(formatOllamaErrorMessage(data.error.trim(), config.model));
 	}
 
 	if (typeof data.response !== 'string' || !data.response.trim()) {
-		throw new Error('Ollama returned an empty response.');
+		log(`Ollama /api/generate response without usable text: ${body}`);
+		throw new UserFacingError('Ollama response did not contain generated text.');
 	}
 
 	return data.response;
@@ -213,13 +283,15 @@ async function fetchOllamaModels(config: ExtensionConfiguration): Promise<string
 	const response = await fetchWithTimeout(endpoint, {
 		method: 'GET'
 	}, 10_000);
+	const body = await readResponseText(response);
 
 	if (!response.ok) {
-		const body = await readResponseText(response);
-		throw new Error(formatOllamaHttpError(response.status, body, config.model));
+		log(`Ollama /api/tags returned HTTP ${response.status}.`);
+		log(`Response body: ${body}`);
+		throw new UserFacingError(formatOllamaHttpError(response.status, body, config.model));
 	}
 
-	const data = await response.json() as OllamaTagsResponse;
+	const data = parseJsonResponse<OllamaTagsResponse>(body, 'Ollama /api/tags');
 	return (data.models ?? [])
 		.map((model) => {
 			if (typeof model.name === 'string') {
@@ -245,11 +317,14 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 			signal: controller.signal
 		});
 	} catch (error) {
+		log(`Request to ${url} failed.`);
+		logErrorDetails(error);
+
 		if (error instanceof Error && error.name === 'AbortError') {
-			throw new Error(`Request to Ollama timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+			throw new UserFacingError(`Request to Ollama timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
 		}
 
-		throw new Error('Ollama is not reachable. Make sure the local Ollama server is running.');
+		throw new UserFacingError('Ollama is not reachable. Make sure it is running and the URL is correct.');
 	} finally {
 		clearTimeout(timeout);
 	}
@@ -264,14 +339,41 @@ function formatOllamaHttpError(status: number, body: string, model: string): str
 	const trimmedBody = body.trim();
 
 	if (status === 404) {
-		return `Ollama returned 404. Check that model "${model}" is installed.`;
+		if (isModelNotFoundMessage(trimmedBody)) {
+			return `Model "${model}" is not installed in Ollama.`;
+		}
+
+		return 'Ollama endpoint was not found. Check the Ollama URL setting.';
 	}
 
-	if (trimmedBody) {
-		return `Ollama returned HTTP ${status}: ${trimmedBody}`;
+	if (isModelNotFoundMessage(trimmedBody)) {
+		return `Model "${model}" is not installed in Ollama.`;
 	}
 
-	return `Ollama returned HTTP ${status}.`;
+	return `Ollama returned HTTP ${status}. Check the Output Channel for details.`;
+}
+
+function formatOllamaErrorMessage(errorText: string, model: string): string {
+	if (isModelNotFoundMessage(errorText)) {
+		return `Model "${model}" is not installed in Ollama.`;
+	}
+
+	return `Ollama returned an error: ${errorText}`;
+}
+
+function isModelNotFoundMessage(message: string): boolean {
+	return /model.*not found|not found.*model|try pulling|pull.*model/i.test(message);
+}
+
+function parseJsonResponse<T>(body: string, context: string): T {
+	try {
+		return JSON.parse(body) as T;
+	} catch (error) {
+		log(`${context} returned invalid JSON.`);
+		log(`Response body: ${body}`);
+		logErrorDetails(error);
+		throw new UserFacingError(`${context} returned an invalid response.`);
+	}
 }
 
 async function readResponseText(response: Response): Promise<string> {
@@ -304,15 +406,32 @@ function findFunctionSignature(code: string): { lineOffset: number; indent: stri
 	return undefined;
 }
 
-function hasExistingDocstring(document: vscode.TextDocument, signatureLine: number): boolean {
-	const nextLine = signatureLine + 1;
+function hasExistingDocstring(code: string, signatureLineOffset: number): boolean {
+	const lines = code.split(/\r?\n/);
+	const signatureLine = lines[signatureLineOffset];
 
-	if (nextLine >= document.lineCount) {
+	if (!signatureLine) {
 		return false;
 	}
 
-	const nextText = document.lineAt(nextLine).text.trimStart();
-	return nextText.startsWith('"""') || nextText.startsWith("'''");
+	const signatureIndent = getLineIndent(signatureLine);
+
+	for (let index = signatureLineOffset + 1; index < lines.length; index += 1) {
+		const line = lines[index];
+		const trimmedLine = line.trim();
+
+		if (!trimmedLine || trimmedLine.startsWith('#')) {
+			continue;
+		}
+
+		if (getLineIndent(line).length <= signatureIndent.length) {
+			return false;
+		}
+
+		return trimmedLine.startsWith('"""') || trimmedLine.startsWith("'''");
+	}
+
+	return false;
 }
 
 function getIndentUnit(editor: vscode.TextEditor): string {
@@ -331,20 +450,38 @@ function getLineIndent(line: string): string {
 function normalizeGeneratedDocstring(rawDocstring: string): string {
 	let normalized = rawDocstring.trim();
 	normalized = stripMarkdownFence(normalized);
+	normalized = stripLeadingLanguageMarker(normalized);
 	normalized = stripTripleQuoteWrapper(normalized);
+	normalized = removeRemainingTripleQuotes(normalized);
 	normalized = removeCommonIndent(normalized.trim());
 
 	return normalized.trim();
 }
 
 function stripMarkdownFence(text: string): string {
-	const lines = text.split(/\r?\n/);
+	const lines = text.trim().split(/\r?\n/);
 
-	if (lines.length >= 2 && lines[0].trim().startsWith('```') && lines[lines.length - 1].trim() === '```') {
-		return lines.slice(1, -1).join('\n').trim();
+	if (lines.length >= 2 && lines[0].trim().startsWith('```')) {
+		lines.shift();
+
+		if (lines[lines.length - 1].trim().startsWith('```')) {
+			lines.pop();
+		}
+
+		return lines.join('\n').trim();
 	}
 
-	return text;
+	return text.trim();
+}
+
+function stripLeadingLanguageMarker(text: string): string {
+	const lines = text.trim().split(/\r?\n/);
+
+	if (lines[0]?.trim().toLowerCase() === 'python') {
+		return lines.slice(1).join('\n').trim();
+	}
+
+	return text.trim();
 }
 
 function stripTripleQuoteWrapper(text: string): string {
@@ -358,6 +495,10 @@ function stripTripleQuoteWrapper(text: string): string {
 	}
 
 	return trimmed;
+}
+
+function removeRemainingTripleQuotes(text: string): string {
+	return text.replace(/"""/g, '').replace(/'''/g, '');
 }
 
 function removeCommonIndent(text: string): string {
@@ -398,13 +539,20 @@ function formatDocstringForInsertion(docstringContent: string, bodyIndent: strin
 
 function handleCommandError(prefix: string, error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
-	vscode.window.showErrorMessage(`${prefix} ${message}`);
+	const userMessage = error instanceof UserFacingError ? message : `${prefix} ${message}`;
 
+	vscode.window.showErrorMessage(userMessage);
 	log(`${prefix} ${message}`);
+	logErrorDetails(error);
+}
 
+function logErrorDetails(error: unknown): void {
 	if (error instanceof Error && error.stack) {
 		log(error.stack);
+		return;
 	}
+
+	log(String(error));
 }
 
 function log(message: string): void {

@@ -34,7 +34,6 @@
 
 - [Описание проекта](docs/PROJECT_OVERVIEW.md)
 - [Инструкция и демонстрационный сценарий](docs/USER_GUIDE.md)
-- [Контекст для ChatGPT по дипломным документам](docs/CHATGPT_DIPLOMA_CONTEXT.md)
 
 ## Локальные Артефакты
 

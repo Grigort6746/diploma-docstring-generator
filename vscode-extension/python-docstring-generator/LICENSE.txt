@@ -1,0 +1,4 @@
+UNLICENSED
+
+This extension is distributed for diploma project testing and demonstration.
+All rights are reserved unless a project license is added later.

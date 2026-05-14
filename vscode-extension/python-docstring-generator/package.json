@@ -3,6 +3,12 @@
   "displayName": "Python Docstring Generator",
   "description": "Generate Python docstrings locally using Ollama models.",
   "version": "0.0.1",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Grigort6746/diploma-docstring-generator.git",
+    "directory": "vscode-extension/python-docstring-generator"
+  },
   "engines": {
     "vscode": "^1.116.0"
   },

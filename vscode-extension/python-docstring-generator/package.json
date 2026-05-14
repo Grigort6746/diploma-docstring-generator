@@ -10,8 +10,14 @@
     "Other"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:python-docstring-generator.generateDocstring",
-    "onCommand:python-docstring-generator.checkOllamaConnection"
+    "onCommand:python-docstring-generator.checkOllamaConnection",
+    "onCommand:python-docstring-generator.setupLocalEnvironment",
+    "onCommand:python-docstring-generator.regenerateDocstring",
+    "onCommand:python-docstring-generator.showStatusMenu",
+    "onCommand:python-docstring-generator.refreshStatus",
+    "onCommand:python-docstring-generator.showOutput"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -24,6 +30,26 @@
       {
         "command": "python-docstring-generator.checkOllamaConnection",
         "title": "Check Ollama Connection",
+        "category": "Python Docstring Generator"
+      },
+      {
+        "command": "python-docstring-generator.setupLocalEnvironment",
+        "title": "Setup Local Environment",
+        "category": "Python Docstring Generator"
+      },
+      {
+        "command": "python-docstring-generator.regenerateDocstring",
+        "title": "Regenerate Python Docstring",
+        "category": "Python Docstring Generator"
+      },
+      {
+        "command": "python-docstring-generator.refreshStatus",
+        "title": "Refresh Local Model Status",
+        "category": "Python Docstring Generator"
+      },
+      {
+        "command": "python-docstring-generator.showOutput",
+        "title": "Show Output Channel",
         "category": "Python Docstring Generator"
       }
     ],
@@ -62,6 +88,16 @@
           "minimum": 1,
           "maximum": 4096,
           "description": "Maximum number of tokens Ollama should generate."
+        },
+        "pythonDocstringGenerator.autoStartOllama": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically try to start a local Ollama server if it is installed but not running."
+        },
+        "pythonDocstringGenerator.autoPullModel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically pull the configured Ollama model when it is missing."
         }
       }
     }

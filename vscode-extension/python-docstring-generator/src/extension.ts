@@ -1,16 +1,26 @@
 import * as vscode from 'vscode';
+import { execFile, spawn } from 'child_process';
 
 const outputChannelName = 'Python Docstring Generator';
 const generateDocstringCommand = 'python-docstring-generator.generateDocstring';
 const checkOllamaConnectionCommand = 'python-docstring-generator.checkOllamaConnection';
+const setupLocalEnvironmentCommand = 'python-docstring-generator.setupLocalEnvironment';
+const regenerateDocstringCommand = 'python-docstring-generator.regenerateDocstring';
+const showStatusMenuCommand = 'python-docstring-generator.showStatusMenu';
+const refreshStatusCommand = 'python-docstring-generator.refreshStatus';
+const showOutputCommand = 'python-docstring-generator.showOutput';
+const ollamaInstallUrl = 'https://ollama.com/download';
 
 let outputChannel: vscode.OutputChannel | undefined;
+let statusBarItem: vscode.StatusBarItem | undefined;
 
 interface ExtensionConfiguration {
 	ollamaUrl: string;
 	model: string;
 	temperature: number;
 	numPredict: number;
+	autoStartOllama: boolean;
+	autoPullModel: boolean;
 }
 
 interface OllamaGenerateResponse {
@@ -25,6 +35,22 @@ interface OllamaTagsResponse {
 	}>;
 }
 
+interface OllamaPullResponse {
+	status?: unknown;
+	digest?: unknown;
+	total?: unknown;
+	completed?: unknown;
+	error?: unknown;
+}
+
+type StatusBarState = 'unknown' | 'checking' | 'ready' | 'offline' | 'modelMissing' | 'starting' | 'downloading' | 'error';
+
+type PreviewChoice = 'Insert' | 'Regenerate' | 'Cancel';
+
+interface GenerateCommandOptions {
+	isRegenerate?: boolean;
+}
+
 class UserFacingError extends Error {
 	public constructor(message: string) {
 		super(message);
@@ -32,27 +58,270 @@ class UserFacingError extends Error {
 	}
 }
 
+class SetupChecklist {
+	private readonly items: Array<{ label: string; status: 'pending' | 'ok' | 'failed'; detail?: string }> = [];
+
+	public start(label: string, detail?: string): void {
+		const existingItem = this.items.find((item) => item.label === label);
+
+		if (existingItem) {
+			existingItem.status = 'pending';
+			existingItem.detail = detail;
+			this.log();
+			return;
+		}
+
+		this.items.push({ label, status: 'pending', detail });
+		this.log();
+	}
+
+	public pass(label: string, detail?: string): void {
+		this.set(label, 'ok', detail);
+	}
+
+	public fail(label: string, detail?: string): void {
+		this.set(label, 'failed', detail);
+	}
+
+	public toDetail(): string {
+		return this.items.map((item) => {
+			const marker = item.status === 'ok' ? '[ok]' : item.status === 'failed' ? '[x]' : '[...]';
+			return item.detail ? `${marker} ${item.label}: ${item.detail}` : `${marker} ${item.label}`;
+		}).join('\n');
+	}
+
+	public logSummary(): void {
+		log('Setup checklist summary:');
+		log(this.toDetail());
+	}
+
+	private set(label: string, status: 'ok' | 'failed', detail?: string): void {
+		const existingItem = this.items.find((item) => item.label === label);
+
+		if (existingItem) {
+			existingItem.status = status;
+			existingItem.detail = detail;
+			this.log();
+			return;
+		}
+
+		this.items.push({ label, status, detail });
+		this.log();
+	}
+
+	private log(): void {
+		log(this.toDetail());
+	}
+}
+
+class OllamaInstallRequiredError extends UserFacingError {
+	public constructor() {
+		super('Ollama is not installed or is not available in PATH. Install Ollama, then run setup again.');
+		this.name = 'OllamaInstallRequiredError';
+	}
+}
+
+class OllamaNotReachableError extends UserFacingError {
+	public constructor() {
+		super('Ollama is not reachable. Make sure it is running and the URL is correct.');
+		this.name = 'OllamaNotReachableError';
+	}
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel(outputChannelName);
+	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	statusBarItem.command = showStatusMenuCommand;
+	statusBarItem.name = 'Python Docstring Generator';
+	setStatusBarState('unknown');
+	statusBarItem.show();
 
 	const generateDisposable = vscode.commands.registerCommand(generateDocstringCommand, async () => {
 		await runGenerateDocstringCommand();
+	});
+
+	const regenerateDisposable = vscode.commands.registerCommand(regenerateDocstringCommand, async () => {
+		await runGenerateDocstringCommand({ isRegenerate: true });
 	});
 
 	const checkConnectionDisposable = vscode.commands.registerCommand(checkOllamaConnectionCommand, async () => {
 		await runCheckOllamaConnectionCommand();
 	});
 
-	context.subscriptions.push(outputChannel, generateDisposable, checkConnectionDisposable);
+	const setupDisposable = vscode.commands.registerCommand(setupLocalEnvironmentCommand, async () => {
+		await runSetupLocalEnvironmentCommand();
+	});
+
+	const showStatusMenuDisposable = vscode.commands.registerCommand(showStatusMenuCommand, async () => {
+		await showStatusMenu();
+	});
+
+	const refreshStatusDisposable = vscode.commands.registerCommand(refreshStatusCommand, async () => {
+		await refreshStatusBar(false);
+	});
+
+	const showOutputDisposable = vscode.commands.registerCommand(showOutputCommand, () => {
+		outputChannel?.show();
+	});
+
+	context.subscriptions.push(
+		outputChannel,
+		statusBarItem,
+		generateDisposable,
+		regenerateDisposable,
+		checkConnectionDisposable,
+		setupDisposable,
+		showStatusMenuDisposable,
+		refreshStatusDisposable,
+		showOutputDisposable
+	);
+
 	log('Extension activated.');
+	void refreshStatusBar(true);
 }
 
 export function deactivate() {
 	outputChannel?.dispose();
+	statusBarItem?.dispose();
 }
 
-async function runGenerateDocstringCommand(): Promise<void> {
-	log('Generate docstring command started.');
+function setStatusBarState(state: StatusBarState, detail?: string): void {
+	if (!statusBarItem) {
+		return;
+	}
+
+	const labels: Record<StatusBarState, string> = {
+		unknown: '$(circle-large-outline) Docstring',
+		checking: '$(sync~spin) Docstring: Checking',
+		ready: '$(check) Docstring: Ready',
+		offline: '$(plug) Docstring: Offline',
+		modelMissing: '$(warning) Docstring: Model missing',
+		starting: '$(debug-start) Docstring: Starting',
+		downloading: '$(cloud-download) Docstring: Downloading',
+		error: '$(error) Docstring: Error'
+	};
+
+	statusBarItem.text = labels[state];
+	statusBarItem.tooltip = detail ? `Python Docstring Generator\n${detail}\nClick for actions.` : 'Python Docstring Generator\nClick for actions.';
+
+	if (state === 'error') {
+		statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+		return;
+	}
+
+	if (state === 'offline' || state === 'modelMissing') {
+		statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+		return;
+	}
+
+	statusBarItem.backgroundColor = undefined;
+}
+
+async function refreshStatusBar(silent: boolean): Promise<void> {
+	setStatusBarState('checking');
+
+	try {
+		const config = getConfiguration();
+		const modelNames = await fetchOllamaModels(config);
+
+		if (modelNames.includes(config.model)) {
+			setStatusBarState('ready', `Model "${config.model}" is available at ${config.ollamaUrl}.`);
+
+			if (!silent) {
+				vscode.window.showInformationMessage(`Local model is ready: ${config.model}.`);
+			}
+
+			return;
+		}
+
+		setStatusBarState('modelMissing', `Model "${config.model}" is not installed.`);
+
+		if (!silent) {
+			const choice = await vscode.window.showWarningMessage(
+				`Model "${config.model}" is not installed.`,
+				'Setup Local Environment',
+				'Show Output'
+			);
+
+			if (choice === 'Setup Local Environment') {
+				await runSetupLocalEnvironmentCommand();
+			}
+
+			if (choice === 'Show Output') {
+				outputChannel?.show();
+			}
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		setStatusBarState(error instanceof OllamaNotReachableError ? 'offline' : 'error', message);
+
+		if (silent) {
+			log(`Silent status refresh failed: ${message}`);
+			return;
+		}
+
+		handleCommandError('Could not refresh local model status.', error);
+	}
+}
+
+async function showStatusMenu(): Promise<void> {
+	const picked = await vscode.window.showQuickPick(
+		[
+			{
+				label: '$(edit) Generate Docstring',
+				description: 'Generate, preview, then insert a docstring',
+				action: generateDocstringCommand
+			},
+			{
+				label: '$(refresh) Regenerate Docstring',
+				description: 'Generate another candidate for the selected function',
+				action: regenerateDocstringCommand
+			},
+			{
+				label: '$(tools) Setup Local Environment',
+				description: 'Start Ollama and download the configured model',
+				action: setupLocalEnvironmentCommand
+			},
+			{
+				label: '$(plug) Check Ollama Connection',
+				description: 'Check server and model availability',
+				action: checkOllamaConnectionCommand
+			},
+			{
+				label: '$(sync) Refresh Status',
+				description: 'Update the status bar indicator',
+				action: refreshStatusCommand
+			},
+			{
+				label: '$(output) Show Output Channel',
+				description: 'Open technical diagnostics',
+				action: showOutputCommand
+			},
+			{
+				label: '$(settings-gear) Open Settings',
+				description: 'Edit Python Docstring Generator settings',
+				action: 'openSettings'
+			}
+		],
+		{
+			placeHolder: 'Python Docstring Generator actions'
+		}
+	);
+
+	if (!picked) {
+		return;
+	}
+
+	if (picked.action === 'openSettings') {
+		await vscode.commands.executeCommand('workbench.action.openSettings', 'pythonDocstringGenerator');
+		return;
+	}
+
+	await vscode.commands.executeCommand(picked.action);
+}
+
+async function runGenerateDocstringCommand(options: GenerateCommandOptions = {}): Promise<void> {
+	log(options.isRegenerate ? 'Regenerate docstring command started.' : 'Generate docstring command started.');
 
 	const editor = vscode.window.activeTextEditor;
 
@@ -94,22 +363,37 @@ async function runGenerateDocstringCommand(): Promise<void> {
 		log(`Selected code length: ${selectedCode.length} characters.`);
 		log(`Using Ollama model "${config.model}" at ${config.ollamaUrl}.`);
 
-		const generatedText = await vscode.window.withProgress(
+		await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
-				title: 'Generating Python docstring...',
+				title: 'Preparing local Ollama model...',
 				cancellable: false
 			},
-			async () => callOllama(config, prompt)
+			async (progress) => {
+				await ensureLocalEnvironment(config, progress);
+			}
 		);
 
-		log('Raw model response before normalization:');
-		log(generatedText);
+		let docstringContent = '';
+		let attempt = 1;
 
-		const docstringContent = normalizeGeneratedDocstring(generatedText);
+		while (true) {
+			docstringContent = await generateDocstringCandidate(config, prompt, attempt);
 
-		if (!docstringContent) {
-			throw new UserFacingError('The model returned an empty docstring.');
+			const previewChoice = await showDocstringPreview(docstringContent, attempt);
+
+			if (previewChoice === 'Insert') {
+				break;
+			}
+
+			if (previewChoice === 'Regenerate') {
+				attempt += 1;
+				continue;
+			}
+
+			vscode.window.showInformationMessage('Docstring insertion cancelled.');
+			log('Docstring insertion cancelled by user.');
+			return;
 		}
 
 		const signatureIndent = getLineIndent(editor.document.lineAt(signatureDocumentLine).text) || signature.indent;
@@ -125,7 +409,20 @@ async function runGenerateDocstringCommand(): Promise<void> {
 			throw new UserFacingError('Could not insert docstring into the editor.');
 		}
 
-		vscode.window.showInformationMessage('Python docstring generated and inserted.');
+		const successChoice = await vscode.window.showInformationMessage(
+			'Python docstring generated and inserted.',
+			'Regenerate',
+			'Show Output'
+		);
+
+		if (successChoice === 'Regenerate') {
+			await vscode.commands.executeCommand(regenerateDocstringCommand);
+		}
+
+		if (successChoice === 'Show Output') {
+			outputChannel?.show();
+		}
+
 		log('Generated docstring:');
 		log(docstringContent);
 	} catch (error) {
@@ -146,7 +443,7 @@ async function runCheckOllamaConnectionCommand(): Promise<void> {
 				title: 'Checking Ollama connection...',
 				cancellable: false
 			},
-			async () => fetchOllamaModels(config)
+			async (progress) => getOllamaModelsWithAutoStart(config, progress)
 		);
 
 		if (modelNames.includes(config.model)) {
@@ -154,11 +451,69 @@ async function runCheckOllamaConnectionCommand(): Promise<void> {
 			return;
 		}
 
-		vscode.window.showWarningMessage(
-			`Model "${config.model}" is not installed or not available in Ollama.`
+		const choice = await vscode.window.showWarningMessage(
+			`Model "${config.model}" is not installed or not available in Ollama.`,
+			'Download Model',
+			'Show Output'
 		);
+
+		if (choice === 'Download Model') {
+			await runSetupLocalEnvironmentCommand();
+			return;
+		}
+
+		if (choice === 'Show Output') {
+			outputChannel?.show();
+		}
 	} catch (error) {
 		handleCommandError('Could not connect to Ollama.', error);
+	}
+}
+
+async function runSetupLocalEnvironmentCommand(): Promise<void> {
+	log('Setup local environment command started.');
+	const checklist = new SetupChecklist();
+	checklist.pass('VS Code extension loaded');
+
+	try {
+		const config = getConfiguration();
+		checklist.pass('Configuration valid', `Model "${config.model}" at ${config.ollamaUrl}`);
+
+		await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title: 'Setting up local docstring model...',
+				cancellable: false
+			},
+			async (progress) => {
+				await ensureLocalEnvironment(config, progress, { forcePullMissingModel: true, checklist });
+			}
+		);
+
+		checklist.logSummary();
+
+		const choice = await vscode.window.showInformationMessage(
+			`Local environment is ready. Model "${config.model}" is available.`,
+			{
+				modal: true,
+				detail: checklist.toDetail()
+			},
+			'Generate Docstring',
+			'Show Output'
+		);
+
+		if (choice === 'Generate Docstring') {
+			await vscode.commands.executeCommand(generateDocstringCommand);
+		}
+
+		if (choice === 'Show Output') {
+			outputChannel?.show();
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		checklist.fail('Local generation ready', message);
+		checklist.logSummary();
+		handleCommandError('Could not setup local environment.', error);
 	}
 }
 
@@ -168,6 +523,8 @@ function getConfiguration(): ExtensionConfiguration {
 	const modelValue = configuration.get<unknown>('model', 'qwen2.5-coder:1.5b');
 	const temperatureValue = configuration.get<unknown>('temperature', 0.2);
 	const numPredictValue = configuration.get<unknown>('numPredict', 256);
+	const autoStartOllamaValue = configuration.get<unknown>('autoStartOllama', true);
+	const autoPullModelValue = configuration.get<unknown>('autoPullModel', true);
 
 	const ollamaUrl = typeof ollamaUrlValue === 'string' ? ollamaUrlValue.trim() : '';
 	const model = typeof modelValue === 'string' ? modelValue.trim() : '';
@@ -201,11 +558,21 @@ function getConfiguration(): ExtensionConfiguration {
 		throw new UserFacingError('numPredict must be a positive integer.');
 	}
 
+	if (typeof autoStartOllamaValue !== 'boolean') {
+		throw new UserFacingError('autoStartOllama must be true or false.');
+	}
+
+	if (typeof autoPullModelValue !== 'boolean') {
+		throw new UserFacingError('autoPullModel must be true or false.');
+	}
+
 	return {
 		ollamaUrl,
 		model,
 		temperature: temperatureValue,
-		numPredict: numPredictValue
+		numPredict: numPredictValue,
+		autoStartOllama: autoStartOllamaValue,
+		autoPullModel: autoPullModelValue
 	};
 }
 
@@ -235,6 +602,76 @@ function generatePrompt(code: string): string {
 		'',
 		'Python function:',
 		code
+	].join('\n');
+}
+
+async function generateDocstringCandidate(
+	config: ExtensionConfiguration,
+	prompt: string,
+	attempt: number
+): Promise<string> {
+	const generatedText = await vscode.window.withProgress(
+		{
+			location: vscode.ProgressLocation.Notification,
+			title: attempt === 1 ? 'Generating Python docstring...' : `Regenerating Python docstring (${attempt})...`,
+			cancellable: false
+		},
+		async () => callOllama(config, prompt)
+	);
+
+	log('Raw model response before normalization:');
+	log(generatedText);
+
+	const docstringContent = normalizeGeneratedDocstring(generatedText);
+
+	if (!docstringContent) {
+		throw new UserFacingError('The model returned an empty docstring.');
+	}
+
+	log(`Generated docstring candidate ${attempt}:`);
+	log(docstringContent);
+
+	return docstringContent;
+}
+
+async function showDocstringPreview(docstringContent: string, attempt: number): Promise<PreviewChoice> {
+	while (true) {
+		const choice = await vscode.window.showInformationMessage(
+			attempt === 1 ? 'Generated docstring preview' : `Generated docstring preview (${attempt})`,
+			{
+				modal: true,
+				detail: formatDocstringPreviewDetail(docstringContent)
+			},
+			'Insert',
+			'Regenerate',
+			'Cancel',
+			'Show Output'
+		);
+
+		if (choice === 'Show Output') {
+			outputChannel?.show();
+			continue;
+		}
+
+		if (choice === 'Regenerate') {
+			return 'Regenerate';
+		}
+
+		if (choice === 'Insert') {
+			return 'Insert';
+		}
+
+		return 'Cancel';
+	}
+}
+
+function formatDocstringPreviewDetail(docstringContent: string): string {
+	return [
+		'The generated docstring will be inserted into the selected function:',
+		'',
+		'"""',
+		docstringContent,
+		'"""'
 	].join('\n');
 }
 
@@ -307,6 +744,260 @@ async function fetchOllamaModels(config: ExtensionConfiguration): Promise<string
 		.filter((modelName): modelName is string => Boolean(modelName));
 }
 
+async function ensureLocalEnvironment(
+	config: ExtensionConfiguration,
+	progress: vscode.Progress<{ message?: string; increment?: number }>,
+	options: { forcePullMissingModel?: boolean; checklist?: SetupChecklist } = {}
+): Promise<void> {
+	setStatusBarState('checking', `Checking ${config.ollamaUrl}.`);
+	progress.report({ message: 'Checking Ollama server...' });
+	log(`Ensuring local environment for model "${config.model}".`);
+	options.checklist?.start('Ollama API reachable', config.ollamaUrl);
+
+	let modelNames = await getOllamaModelsWithAutoStart(config, progress, options.checklist);
+	options.checklist?.pass('Ollama API reachable', config.ollamaUrl);
+	options.checklist?.start('Model available', config.model);
+
+	if (modelNames.includes(config.model)) {
+		progress.report({ message: `Model "${config.model}" is already available.` });
+		log(`Model "${config.model}" is already available.`);
+		setStatusBarState('ready', `Model "${config.model}" is available.`);
+		options.checklist?.pass('Model available', config.model);
+		options.checklist?.pass('Local generation ready');
+		return;
+	}
+
+	const shouldPull = options.forcePullMissingModel === true || config.autoPullModel;
+
+	if (!shouldPull) {
+		setStatusBarState('modelMissing', `Model "${config.model}" is not installed.`);
+		options.checklist?.fail('Model available', `Model "${config.model}" is not installed.`);
+		throw new UserFacingError(
+			`Model "${config.model}" is not installed in Ollama. Enable autoPullModel or run setup.`
+		);
+	}
+
+	setStatusBarState('downloading', `Downloading model "${config.model}".`);
+	await pullOllamaModel(config, progress);
+	modelNames = await fetchOllamaModels(config);
+
+	if (!modelNames.includes(config.model)) {
+		options.checklist?.fail('Model available', `Model "${config.model}" is not listed after download.`);
+		throw new UserFacingError(`Model "${config.model}" was downloaded but is not listed by Ollama yet.`);
+	}
+
+	progress.report({ message: `Model "${config.model}" is ready.` });
+	log(`Model "${config.model}" is ready.`);
+	setStatusBarState('ready', `Model "${config.model}" is available.`);
+	options.checklist?.pass('Model available', config.model);
+	options.checklist?.pass('Local generation ready');
+}
+
+async function getOllamaModelsWithAutoStart(
+	config: ExtensionConfiguration,
+	progress: vscode.Progress<{ message?: string; increment?: number }>,
+	checklist?: SetupChecklist
+): Promise<string[]> {
+	try {
+		return await fetchOllamaModels(config);
+	} catch (error) {
+		if (!(error instanceof OllamaNotReachableError)) {
+			throw error;
+		}
+
+		if (!config.autoStartOllama) {
+			setStatusBarState('offline', 'Ollama is not reachable and autoStartOllama is disabled.');
+			checklist?.fail('Ollama API reachable', 'Ollama is not reachable and autoStartOllama is disabled.');
+			throw error;
+		}
+
+		if (!isLocalOllamaUrl(config.ollamaUrl)) {
+			setStatusBarState('offline', 'Automatic start is supported only for localhost Ollama URLs.');
+			checklist?.fail('Ollama API reachable', 'Automatic start is supported only for localhost Ollama URLs.');
+			throw new UserFacingError(
+				'Ollama is not reachable. Automatic start is supported only for localhost Ollama URLs.'
+			);
+		}
+
+		setStatusBarState('starting', 'Trying to start local Ollama server.');
+		checklist?.start('Ollama startup', 'ollama serve');
+		progress.report({ message: 'Ollama is not running. Trying to start it...' });
+		await startOllamaServer(checklist);
+		await waitForOllama(config, progress);
+		checklist?.pass('Ollama startup', 'ollama serve started');
+		vscode.window.showInformationMessage('Ollama server started.');
+		return fetchOllamaModels(config);
+	}
+}
+
+async function startOllamaServer(checklist?: SetupChecklist): Promise<void> {
+	checklist?.start('Ollama executable available', 'ollama');
+
+	if (!(await isCommandAvailable('ollama'))) {
+		setStatusBarState('offline', 'Ollama command was not found in PATH.');
+		checklist?.fail('Ollama executable available', 'ollama was not found in PATH.');
+		throw new OllamaInstallRequiredError();
+	}
+
+	checklist?.pass('Ollama executable available', 'ollama found in PATH.');
+	log('Starting local Ollama server with "ollama serve".');
+
+	const child = spawn('ollama', ['serve'], {
+		detached: true,
+		stdio: 'ignore',
+		windowsHide: true
+	});
+
+	child.unref();
+}
+
+async function waitForOllama(
+	config: ExtensionConfiguration,
+	progress: vscode.Progress<{ message?: string; increment?: number }>
+): Promise<void> {
+	const attempts = 20;
+
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		progress.report({ message: `Waiting for Ollama to start (${attempt}/${attempts})...` });
+
+		try {
+			await fetchOllamaModels(config);
+			return;
+		} catch (error) {
+			if (!(error instanceof OllamaNotReachableError)) {
+				throw error;
+			}
+
+			await delay(1_000);
+		}
+	}
+
+	throw new UserFacingError('Ollama did not start in time. Check the Output Channel for details.');
+}
+
+async function pullOllamaModel(
+	config: ExtensionConfiguration,
+	progress: vscode.Progress<{ message?: string; increment?: number }>
+): Promise<void> {
+	progress.report({ message: `Downloading model "${config.model}"...` });
+	log(`Pulling Ollama model "${config.model}" via /api/pull.`);
+
+	const endpoint = buildOllamaUrl(config.ollamaUrl, 'api/pull');
+	const response = await fetchWithTimeout(endpoint, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			model: config.model,
+			stream: true
+		})
+	}, 30 * 60_000);
+
+	if (!response.ok) {
+		const body = await readResponseText(response);
+		log(`Ollama /api/pull returned HTTP ${response.status}.`);
+		log(`Response body: ${body}`);
+		throw new UserFacingError(formatOllamaHttpError(response.status, body, config.model));
+	}
+
+	await readOllamaPullStream(response, progress, config.model);
+	vscode.window.showInformationMessage(`Model "${config.model}" downloaded and ready.`);
+}
+
+async function readOllamaPullStream(
+	response: Response,
+	progress: vscode.Progress<{ message?: string; increment?: number }>,
+	model: string
+): Promise<void> {
+	if (!response.body) {
+		throw new UserFacingError('Ollama did not return a model download stream.');
+	}
+
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+	let lastPercent = 0;
+	let lastStatus = '';
+
+	while (true) {
+		const { done, value } = await reader.read();
+
+		if (done) {
+			break;
+		}
+
+		buffer += decoder.decode(value, { stream: true });
+		const lines = buffer.split(/\r?\n/);
+		buffer = lines.pop() ?? '';
+
+		for (const line of lines) {
+			const update = parsePullStreamLine(line);
+
+			if (!update) {
+				continue;
+			}
+
+			if (typeof update.error === 'string' && update.error.trim()) {
+				log(`Ollama /api/pull error field: ${update.error.trim()}`);
+				throw new UserFacingError(formatOllamaErrorMessage(update.error.trim(), model));
+			}
+
+			const status = typeof update.status === 'string' ? update.status : '';
+
+			if (status && status !== lastStatus) {
+				lastStatus = status;
+				log(`Model pull status: ${status}`);
+				progress.report({ message: status });
+			}
+
+			if (typeof update.completed === 'number' && typeof update.total === 'number' && update.total > 0) {
+				const percent = Math.floor((update.completed / update.total) * 100);
+				const increment = Math.max(0, percent - lastPercent);
+				lastPercent = percent;
+
+				progress.report({
+					message: `${status || 'Downloading'} ${percent}%`,
+					increment
+				});
+			}
+
+			if (status === 'success') {
+				progress.report({ message: `Model "${model}" downloaded.`, increment: 100 - lastPercent });
+				return;
+			}
+		}
+	}
+
+	if (buffer.trim()) {
+		const update = parsePullStreamLine(buffer);
+
+		if (typeof update?.error === 'string' && update.error.trim()) {
+			throw new UserFacingError(formatOllamaErrorMessage(update.error.trim(), model));
+		}
+
+		if (update?.status === 'success') {
+			return;
+		}
+	}
+}
+
+function parsePullStreamLine(line: string): OllamaPullResponse | undefined {
+	const trimmedLine = line.trim();
+
+	if (!trimmedLine) {
+		return undefined;
+	}
+
+	try {
+		return JSON.parse(trimmedLine) as OllamaPullResponse;
+	} catch (error) {
+		log(`Could not parse Ollama pull stream line: ${trimmedLine}`);
+		logErrorDetails(error);
+		return undefined;
+	}
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -324,7 +1015,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 			throw new UserFacingError(`Request to Ollama timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
 		}
 
-		throw new UserFacingError('Ollama is not reachable. Make sure it is running and the URL is correct.');
+		throw new OllamaNotReachableError();
 	} finally {
 		clearTimeout(timeout);
 	}
@@ -333,6 +1024,47 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 function buildOllamaUrl(baseUrl: string, endpoint: string): string {
 	const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
 	return new URL(endpoint, normalizedBaseUrl).toString();
+}
+
+function isLocalOllamaUrl(value: string): boolean {
+	try {
+		const parsedUrl = new URL(value);
+		return ['localhost', '127.0.0.1', '::1'].includes(parsedUrl.hostname);
+	} catch {
+		return false;
+	}
+}
+
+async function isCommandAvailable(command: string): Promise<boolean> {
+	const executable = process.platform === 'win32' ? 'where.exe' : 'which';
+
+	try {
+		await execFilePromise(executable, [command]);
+		return true;
+	} catch (error) {
+		log(`Command "${command}" was not found in PATH.`);
+		logErrorDetails(error);
+		return false;
+	}
+}
+
+function execFilePromise(command: string, args: string[]): Promise<void> {
+	return new Promise((resolve, reject) => {
+		execFile(command, args, { windowsHide: true }, (error) => {
+			if (error) {
+				reject(error);
+				return;
+			}
+
+			resolve();
+		});
+	});
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
 }
 
 function formatOllamaHttpError(status: number, body: string, model: string): string {
@@ -541,7 +1273,30 @@ function handleCommandError(prefix: string, error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
 	const userMessage = error instanceof UserFacingError ? message : `${prefix} ${message}`;
 
-	vscode.window.showErrorMessage(userMessage);
+	if (error instanceof OllamaInstallRequiredError || error instanceof OllamaNotReachableError) {
+		setStatusBarState('offline', message);
+	} else {
+		setStatusBarState('error', message);
+	}
+
+	if (error instanceof OllamaInstallRequiredError) {
+		vscode.window.showErrorMessage(userMessage, 'Open Ollama Download', 'Show Output').then(async (choice) => {
+			if (choice === 'Open Ollama Download') {
+				await vscode.env.openExternal(vscode.Uri.parse(ollamaInstallUrl));
+			}
+
+			if (choice === 'Show Output') {
+				outputChannel?.show();
+			}
+		});
+	} else {
+		vscode.window.showErrorMessage(userMessage, 'Show Output').then((choice) => {
+			if (choice === 'Show Output') {
+				outputChannel?.show();
+			}
+		});
+	}
+
 	log(`${prefix} ${message}`);
 	logErrorDetails(error);
 }

@@ -1,18 +1,41 @@
 # Diploma Docstring Generator
 
-Diploma project for local Python docstring generation with machine learning models.
+Дипломный проект на тему:
 
-The repository is organized as a single workspace with two practical parts:
+> Интеграция моделей машинного обучения для автоматизированной генерации документации в проектах на Python
 
-- `vscode-extension/python-docstring-generator/` - VS Code extension that sends selected Python code to local Ollama and inserts a generated docstring.
-- `training/` - training, dataset preparation, and research scripts for code-to-docstring models.
+Цель проекта - разработать локальный инструмент, который помогает разработчику генерировать Python docstring прямо внутри Visual Studio Code с использованием локальных моделей машинного обучения.
 
-The main product path is local execution. User code should not be sent to cloud APIs.
+## Основная Идея
 
-## Current MVP
+Пользователь выделяет Python-функцию в VS Code, расширение отправляет код в локальный Ollama REST API, локальная модель генерирует Google-style docstring, после чего расширение показывает preview и вставляет выбранный вариант обратно в редактор.
 
-The extension works with local Ollama models and keeps the model name configurable through VS Code settings. The training folder contains the research pipeline and legacy experiments that can be used for diploma comparison and future fine-tuning work.
+Код пользователя не отправляется в облачные API. Основной сценарий работает локально.
 
-## Local Artifacts
+## Структура Репозитория
 
-Large datasets, virtual environments, model checkpoints, and downloaded model weights are intentionally not tracked in Git. Keep them locally or document where to download/regenerate them.
+- `vscode-extension/python-docstring-generator/` - VS Code extension, основной демонстрационный продукт.
+- `training/` - скрипты подготовки датасетов, обучения, генерации и исследовательские эксперименты.
+- `docs/` - проектная документация, инструкция и контекст для подготовки дипломных материалов.
+
+## Текущий MVP
+
+Расширение уже умеет:
+
+- проверять и запускать локальный Ollama;
+- скачивать выбранную модель через Ollama API;
+- генерировать docstring для выделенной Python-функции;
+- показывать preview результата перед вставкой;
+- повторно генерировать вариант docstring;
+- показывать статус локального backend в status bar;
+- вести диагностический лог в Output Channel.
+
+Подробнее:
+
+- [Описание проекта](docs/PROJECT_OVERVIEW.md)
+- [Инструкция и демонстрационный сценарий](docs/USER_GUIDE.md)
+- [Контекст для ChatGPT по дипломным документам](docs/CHATGPT_DIPLOMA_CONTEXT.md)
+
+## Локальные Артефакты
+
+Большие датасеты, виртуальные окружения, checkpoint-и и веса моделей не хранятся в Git. Они должны оставаться локально или восстанавливаться по инструкции.

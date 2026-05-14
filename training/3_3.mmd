@@ -1,0 +1,31 @@
+﻿%%{init: {'theme': 'default', 'themeVariables': { 'background': '#FFFFFF' }}}%%
+flowchart LR
+    %% Р’С…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ
+    A["Data Layer (.parquet С„Р°Р№Р»С‹: РєРѕРґ + docstring)"]
+
+    %% РћСЃРЅРѕРІРЅС‹Рµ РєРѕРјРїРѕРЅРµРЅС‚С‹
+    B["T5Tokenizer (С‚РѕРєРµРЅРёР·Р°С†РёСЏ РєРѕРґР° Рё docstring)"]
+    C["CodeT5 Model (Encoder-Decoder Transformer)"]
+    D["Seq2SeqTrainer (С†РёРєР» РѕР±СѓС‡РµРЅРёСЏ, loss, С‡РµРєРїРѕРёРЅС‚С‹)"]
+    E["Evaluator (BLEU, ROUGE, evaluate)"]
+    F["Model Storage (pytorch_model.bin config.json tokenizer.json)"]
+    G["Р›РѕРіРёСЂРѕРІР°РЅРёРµ (trainer_state.json Р»РѕРіРё, РјРµС‚СЂРёРєРё)"]
+
+    %% РЎРІСЏР·Рё
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    D --> G
+    D --> F
+    E --> G
+    F -.->|Р—Р°РіСЂСѓР·РєР° РїСЂРё РёРЅС„РµСЂРµРЅСЃРµ| C
+
+    %% === Р¦Р’Р•РўРђ: РІС‹СЃРѕРєР°СЏ С‡РёС‚Р°РµРјРѕСЃС‚СЊ, WCAG ===
+    style A fill:#E8F5E9,stroke:#1B5E20,stroke-width:2px,color:#000
+    style B fill:#FFF8E1,stroke:#FF6F00,stroke-width:2px,color:#000
+    style C fill:#E1F5FE,stroke:#0277BD,stroke-width:3px,color:#000
+    style D fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px,color:#000
+    style E fill:#FFEBEE,stroke:#C62828,stroke-width:2px,color:#000
+    style F fill:#E8F5E9,stroke:#2E7D32,stroke-width:3px,color:#000
+    style G fill:#ECEFF1,stroke:#455A64,stroke-width:2px,color:#000

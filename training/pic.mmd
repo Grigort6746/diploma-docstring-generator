@@ -1,0 +1,31 @@
+﻿%%{init: {'theme': 'default', 'themeVariables': { 'background': '#FFFFFF' }}}%%
+flowchart LR
+    A[GitHub]:::icon
+    B[РџР°СЂСЃРµСЂ]:::icon
+    D[РџСЂРµРґРѕР±СЂР°Р±РѕС‚РєР°]:::icon
+    F[CodeT5]:::icon
+    I[Р“РµРЅРµСЂР°С†РёСЏ]:::icon
+    J[GUI]:::icon
+    K[РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ]:::icon
+
+    C[(CodeSearchNet)]:::db
+    E[(Р”Р°С‚Р°СЃРµС‚)]:::db
+    H[(РњРѕРґРµР»СЊ)]:::db
+
+    A --> B
+    B --> D
+    C --> D
+    D --> E
+    E --> F
+    G[Hyperparams] --> F
+    F --> H
+    H --> I
+    I --> J
+    K <--> J
+
+    classDef db fill:#ffffff,stroke:#1565c0,stroke-width:2px,color:#000000,font-weight:bold;
+    classDef icon fill:#ffffff,stroke:#495057,stroke-width:1.5px,color:#212529,font-weight:600;
+
+
+    class C,E,H db
+    class A,B,D,F,I,J,K icon

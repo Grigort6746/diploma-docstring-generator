@@ -93,6 +93,7 @@ ENV/
 *.jsonl
 *.csv
 *.tsv
+*.xlsx
 
 # Large model files
 *.gguf
@@ -113,6 +114,15 @@ mlruns/
 # Local model folders
 models/
 model/
+git_model/
+local-codet5-small/
+codet5_docgen/
+codet5_docgen_final/
+results/
+results_final/
+scratch_t5_model/
+scratch_t5_results/
+csn_python_filtered/
 merged_model/
 qwen-docstring-clean-fp16/
 qwen-docstring-merged/

@@ -1,0 +1,62 @@
+﻿{
+  "candidate": {
+    "path": "docstring_training_v2\\functions_with_docstrings_5.parquet",
+    "rows": 49868,
+    "unique_code": 48237,
+    "unique_pairs": 48896,
+    "avg_code_chars": 606.76,
+    "avg_docstring_chars": 357.58
+  },
+  "references": {
+    "docstring_training_v2\\git_big_dataset.parquet": {
+      "rows": 49868,
+      "unique_code": 48248,
+      "unique_pairs": 48902,
+      "avg_code_chars": 606.51,
+      "avg_docstring_chars": 357.58,
+      "overlap_with_candidate_code": 47911,
+      "overlap_with_candidate_pairs": 48556,
+      "candidate_new_code_vs_reference": 326
+    },
+    "functions_with_docstrings_4.parquet": {
+      "rows": 18570,
+      "unique_code": 18294,
+      "unique_pairs": 18487,
+      "avg_code_chars": 590.35,
+      "avg_docstring_chars": 409.15,
+      "overlap_with_candidate_code": 8028,
+      "overlap_with_candidate_pairs": 7898,
+      "candidate_new_code_vs_reference": 40209
+    },
+    "git_dataset.parquet": {
+      "rows": 18570,
+      "unique_code": 18293,
+      "unique_pairs": 18486,
+      "avg_code_chars": 589.95,
+      "avg_docstring_chars": 409.15,
+      "overlap_with_candidate_code": 7947,
+      "overlap_with_candidate_pairs": 7819,
+      "candidate_new_code_vs_reference": 40290
+    },
+    "finaly_dataset.parquet": {
+      "rows": 113811,
+      "unique_code": 113810,
+      "unique_pairs": 113811,
+      "avg_code_chars": 624.89,
+      "avg_docstring_chars": 316.49,
+      "overlap_with_candidate_code": 236,
+      "overlap_with_candidate_pairs": 0,
+      "candidate_new_code_vs_reference": 48001
+    },
+    "csn_python_filtered": {
+      "rows": 17407,
+      "unique_code": 17182,
+      "unique_pairs": 17329,
+      "avg_code_chars": 576.13,
+      "avg_docstring_chars": 344.45,
+      "overlap_with_candidate_code": 7612,
+      "overlap_with_candidate_pairs": 7504,
+      "candidate_new_code_vs_reference": 40625
+    }
+  }
+}

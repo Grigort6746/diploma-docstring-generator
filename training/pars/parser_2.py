@@ -1,17 +1,17 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 collect_github_dataset.py
 
-РЎРѕР±РёСЂР°РµС‚ СЂРµРїРѕР·РёС‚РѕСЂРёРё СЃ GitHub, РёР·РІР»РµРєР°РµС‚ С„СѓРЅРєС†РёРё СЃ Google-style docstrings (Args:, Returns:)
-Рё СЃРѕС…СЂР°РЅСЏРµС‚ РїР°СЂС‹ {code, docstring, function_name, repo_url, file_path} РІ parquet.
+Собирает репозитории с GitHub, извлекает функции с Google-style docstrings (Args:, Returns:)
+и сохраняет пары {code, docstring, function_name, repo_url, file_path} в parquet.
 
-РћСЃРѕР±РµРЅРЅРѕСЃС‚Рё:
-- РђСЃРёРЅС…СЂРѕРЅРЅС‹Р№ СЃР±РѕСЂ СЃРїРёСЃРєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ СЃ РїР°РіРёРЅР°С†РёРµР№ Рё СЂР°Р·Р±РёРµРЅРёРµРј РїРѕ created: РґРёР°РїР°Р·РѕРЅР°Рј.
-- Р РѕС‚Р°С†РёСЏ РЅРµСЃРєРѕР»СЊРєРёС… GitHub С‚РѕРєРµРЅРѕРІ.
-- РњРЅРѕРіРѕРїРѕС‚РѕС‡РЅРѕРµ РєР»РѕРЅРёСЂРѕРІР°РЅРёРµ Рё РїР°СЂСЃРёРЅРі СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ.
-- РџСЂРѕРІРµСЂРєР° СЏР·С‹РєР° docstring (Р°РЅРіР»РёР№СЃРєРёР№).
-- РћРіСЂР°РЅРёС‡РµРЅРёРµ РґР»РёРЅС‹ С„СѓРЅРєС†РёРё.
-- РџСЂРѕРјРµР¶СѓС‚РѕС‡РЅРѕРµ СЃРѕС…СЂР°РЅРµРЅРёРµ (checkpoint) РєР°Р¶РґС‹Рµ SAVE_EVERY СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ.
+Особенности:
+- Асинхронный сбор списка репозиториев с пагинацией и разбиением по created: диапазонам.
+- Ротация нескольких GitHub токенов.
+- Многопоточное клонирование и парсинг репозиториев.
+- Проверка языка docstring (английский).
+- Ограничение длины функции.
+- Промежуточное сохранение (checkpoint) каждые SAVE_EVERY репозиториев.
 """
 
 import os
@@ -29,9 +29,9 @@ from concurrent.futures import ThreadPoolExecutor
 from tqdm.asyncio import tqdm as atqdm
 from tqdm import tqdm
 
-DetectorFactory.seed = 0  # РґР»СЏ СЃС‚Р°Р±РёР»СЊРЅРѕСЃС‚Рё langdetect
+DetectorFactory.seed = 0  # для стабильности langdetect
 
-# ========== РќРђРЎРўР РћР™РљР ==========
+# ========== НАСТРОЙКИ ==========
 TOKENS = [
     token.strip()
     for token in os.getenv("GITHUB_TOKENS", os.getenv("GITHUB_TOKEN", "")).split(",")
@@ -40,20 +40,21 @@ TOKENS = [
 
 if not TOKENS:
     raise RuntimeError("Set GITHUB_TOKEN or comma-separated GITHUB_TOKENS before running this script.")
+
 OUTPUT_FILE = "functions_with_docstrings.parquet"
 CHECKPOINT_DIR = "checkpoints"
-REPOS_TARGET = 10000         # СЃРєРѕР»СЊРєРѕ СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ С…РѕС‚РёРј РѕР±СЂР°Р±РѕС‚Р°С‚СЊ
+REPOS_TARGET = 10000         # сколько репозиториев хотим обработать
 PER_PAGE = 100              # GitHub API max per_page
-PAGES_PER_QUERY = 10        # РѕР±С‹С‡РЅРѕ РґРѕ 10 СЃС‚СЂР°РЅРёС† (1000) вЂ” РЅРѕ РјС‹ СЂР°Р·Р±РёРІР°РµРј РїРѕ РґР°С‚Р°Рј
+PAGES_PER_QUERY = 10        # обычно до 10 страниц (1000) — но мы разбиваем по датам
 MAX_FILES_PER_REPO = 100
-MAX_CODE_TOKENS = 500       # Р»РёРјРёС‚ СЃР»РѕРІ РІ РєРѕРґРµ С„СѓРЅРєС†РёРё
-MAX_WORKERS = 16            # РїРѕС‚РѕРєРё РґР»СЏ РєР»РѕРЅРёСЂРѕРІР°РЅРёСЏ/РїР°СЂСЃРёРЅРіР°
-SAVE_EVERY = 1000             # СЃРѕС…СЂР°РЅСЏС‚СЊ РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅРѕ РєР°Р¶РґС‹Рµ N СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ
-GITHUB_SEARCH_SLEEP = 1.2   # РїР°СѓР·Р° РјРµР¶РґСѓ Р·Р°РїСЂРѕСЃР°РјРё РїРѕРёСЃРєР° (СЃРµРє)
+MAX_CODE_TOKENS = 500       # лимит слов в коде функции
+MAX_WORKERS = 16            # потоки для клонирования/парсинга
+SAVE_EVERY = 1000             # сохранять промежуточно каждые N репозиториев
+GITHUB_SEARCH_SLEEP = 1.2   # пауза между запросами поиска (сек)
 
-# Р Р°Р·Р±РёРІР°РµРј РїРѕ РґРёР°РїР°Р·РѕРЅР°Рј РґР°С‚ (created:) - СЃРїРёСЃРѕРє РєРѕСЂС‚РµР¶РµР№ (start, end)
-# РџРѕРґР±РµСЂРёС‚Рµ РїРµСЂРёРѕРґС‹ С‚Р°Рє, С‡С‚РѕР±С‹ РІ РєР°Р¶РґРѕРј РґРёР°РїР°Р·РѕРЅРµ Р±С‹Р»Рѕ <=1000 СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ.
-# РџСЂРёРјРµСЂ: РїРѕ РіРѕРґР°Рј (РЅР°Р±РёСЂР°РµРј СЃС‚РѕР»СЊРєРѕ РґРёР°РїР°Р·РѕРЅРѕРІ, СЃРєРѕР»СЊРєРѕ РЅСѓР¶РЅРѕ)
+# Разбиваем по диапазонам дат (created:) - список кортежей (start, end)
+# Подберите периоды так, чтобы в каждом диапазоне было <=1000 результатов.
+# Пример: по годам (набираем столько диапазонов, сколько нужно)
 DATE_RANGES = [
     ("2010-01-01", "2012-12-31"),
     ("2013-01-01", "2014-12-31"),
@@ -66,13 +67,13 @@ DATE_RANGES = [
     ("2023-01-01", "2023-12-31"),
     ("2024-01-01", "2024-12-31"),
 ]
-# РљРѕСЂСЂРµРєС‚РёСЂСѓР№С‚Рµ DATE_RANGES, РїРѕРєР° РЅРµ РЅР°РєРѕРїРёС‚Рµ REPOS_TARGET СЂРµРїРѕ.
+# Корректируйте DATE_RANGES, пока не накопите REPOS_TARGET репо.
 
 # =================================
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-# ========== РЈС‚РёР»РёС‚С‹ ==========
+# ========== Утилиты ==========
 def rotate_token(index: int) -> str:
     return TOKENS[index % len(TOKENS)]
 
@@ -87,7 +88,7 @@ def safe_detect_lang(text: str) -> str:
     except Exception:
         return "unknown"
 
-# ========== РџР°СЂСЃРµСЂ С„СѓРЅРєС†РёР№ ==========
+# ========== Парсер функций ==========
 def extract_functions_from_file(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -126,9 +127,9 @@ def extract_functions_from_file(file_path):
             })
     return entries
 
-# ========== РљР»РѕРЅРёСЂРѕРІР°РЅРёРµ Рё РїР°СЂСЃРёРЅРі СЂРµРїРѕ ==========
+# ========== Клонирование и парсинг репо ==========
 def process_repository_clone(repo_url, max_files=MAX_FILES_PER_REPO):
-    """РљР»РѕРЅРёСЂСѓРµС‚ СЂРµРїРѕ (С€allow depth=1) Рё РїР°СЂСЃРёС‚ .py С„Р°Р№Р»С‹. Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє Р·Р°РїРёСЃРµР№."""
+    """Клонирует репо (шallow depth=1) и парсит .py файлы. Возвращает список записей."""
     results = []
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
@@ -143,7 +144,7 @@ def process_repository_clone(repo_url, max_files=MAX_FILES_PER_REPO):
                     path = os.path.join(root, name)
                     try:
                         entries = extract_functions_from_file(path)
-                        # РґРѕР±Р°РІРёРј РєРѕРЅС‚РµРєСЃС‚ СЂРµРїРѕ/file РґР»СЏ РєР°Р¶РґРѕРіРѕ
+                        # добавим контекст репо/file для каждого
                         for e in entries:
                             e["repo_url"] = repo_url
                             e["file_path"] = path.replace(tmpdir + os.sep, "")
@@ -158,9 +159,9 @@ def process_repository_clone(repo_url, max_files=MAX_FILES_PER_REPO):
                 break
     return results
 
-# ========== РђСЃРёРЅС…СЂРѕРЅРЅС‹Р№ СЃР±РѕСЂ СЃРїРёСЃРєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ (СЃ РїР°РіРёРЅР°С†РёРµР№ Рё РґР°С‚Р°РјРё) ==========
+# ========== Асинхронный сбор списка репозиториев (с пагинацией и датами) ==========
 async def fetch_repos_for_range(session, start_date, end_date, token, per_page=PER_PAGE, pages=PAGES_PER_QUERY):
-    """Р—Р°РїСЂРѕСЃ search/repositories РґР»СЏ РґРёР°РїР°Р·РѕРЅР° created: start..end. Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє clone_url."""
+    """Запрос search/repositories для диапазона created: start..end. Возвращает список clone_url."""
     urls = []
     headers = {"Authorization": f"token {token}"}
     base_q = f"language:python+created:{start_date}..{end_date}+stars:>1"
@@ -173,7 +174,7 @@ async def fetch_repos_for_range(session, start_date, end_date, token, per_page=P
             if resp.status != 200:
                 text = await resp.text()
                 print(f"Warning: GitHub search returned status {resp.status} (page {page}): {text[:200]}")
-                # РµСЃР»Рё rate limit, РїРѕРїС‹С‚РєР° РѕР¶РёРґР°С‚СЊ
+                # если rate limit, попытка ожидать
                 if resp.status == 403:
                     reset = resp.headers.get("X-RateLimit-Reset")
                     if reset:
@@ -196,7 +197,7 @@ async def gather_repo_urls(target_count=REPOS_TARGET):
     repo_urls = []
     async with aiohttp.ClientSession() as session:
         token_index = 0
-        # РѕР±С…РѕРґРёРј РґРёР°РїР°Р·РѕРЅС‹ РґР°С‚
+        # обходим диапазоны дат
         for (start, end) in DATE_RANGES:
             # rotate token
             token = rotate_token(token_index)
@@ -207,20 +208,20 @@ async def gather_repo_urls(target_count=REPOS_TARGET):
                     return repo_urls
                 if u not in repo_urls:
                     repo_urls.append(u)
-            # РЅРµР±РѕР»СЊС€Р°СЏ РїР°СѓР·Р° РјРµР¶РґСѓ РґРёР°РїР°Р·РѕРЅР°РјРё
+            # небольшая пауза между диапазонами
             await asyncio.sleep(0.5)
-            # Р·Р°С‰РёС‚Р° РѕС‚ СЃР»РёС€РєРѕРј Р±С‹СЃС‚СЂРѕР№ СЂР°Р±РѕС‚С‹
+            # защита от слишком быстрой работы
             if len(repo_urls) >= target_count:
                 break
     return repo_urls
 
-# ========== РћСЃРЅРѕРІРЅРѕР№ workflow ==========
+# ========== Основной workflow ==========
 async def main():
     print("=== Start collecting repo URLs ===")
     repo_urls = await gather_repo_urls(REPOS_TARGET)
     print(f"Found {len(repo_urls)} repo URLs; preparing to clone and parse.")
 
-    # checkpoint: РµСЃР»Рё СѓР¶Рµ РµСЃС‚СЊ С„Р°Р№Р» СЃ РѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹РјРё СЂРµРїРѕ вЂ” Р·Р°РіСЂСѓР·РёРј, С‡С‚РѕР±С‹ РЅРµ РґСѓР±Р»РёСЂРѕРІР°С‚СЊ
+    # checkpoint: если уже есть файл с обработанными репо — загрузим, чтобы не дублировать
     processed_repos_file = os.path.join(CHECKPOINT_DIR, "processed_repos.jsonl")
     processed_set = set()
     if os.path.exists(processed_repos_file):

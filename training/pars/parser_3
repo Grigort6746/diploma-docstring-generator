@@ -1,10 +1,10 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 collect_github_dataset_v2.py
 ---------------------------------
-РђСЃРёРЅС…СЂРѕРЅРЅС‹Р№ СЃР±РѕСЂ Python-СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ СЃ GitHub,
-РёР·РІР»РµС‡РµРЅРёРµ С„СѓРЅРєС†РёР№ СЃ docstring РІ Google-С„РѕСЂРјР°С‚Рµ.
-Р Р°Р±РѕС‚Р°РµС‚ СЃ РЅРµСЃРєРѕР»СЊРєРёРјРё С‚РѕРєРµРЅР°РјРё, Р±РµР· С„РёР»СЊС‚СЂР°С†РёРё РїРѕ РґР°С‚Р°Рј.
+Асинхронный сбор Python-репозиториев с GitHub,
+извлечение функций с docstring в Google-формате.
+Работает с несколькими токенами, без фильтрации по датам.
 """
 
 import os
@@ -21,10 +21,10 @@ from langdetect import detect, DetectorFactory
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
-# Р”Р»СЏ СЃС‚Р°Р±РёР»СЊРЅРѕСЃС‚Рё РѕРїСЂРµРґРµР»РµРЅРёСЏ СЏР·С‹РєР°
+# Для стабильности определения языка
 DetectorFactory.seed = 0
 
-# ========== РќРђРЎРўР РћР™РљР ==========
+# ========== НАСТРОЙКИ ==========
 TOKENS = [
     token.strip()
     for token in os.getenv("GITHUB_TOKENS", os.getenv("GITHUB_TOKEN", "")).split(",")
@@ -36,19 +36,19 @@ if not TOKENS:
 
 OUTPUT_FILE = "functions_with_docstrings_2.parquet"
 CHECKPOINT_DIR = "checkpoints_data_2"
-REPOS_TARGET = 10000          # СЃРєРѕР»СЊРєРѕ СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ
-PER_PAGE = 1000               # РјР°РєСЃРёРјСѓРј 100
-PAGES = 10                   # РјР°РєСЃРёРјСѓРј 10 (1000 СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ)
-MAX_FILES_PER_REPO = 100     # РјР°РєСЃРёРјСѓРј .py С„Р°Р№Р»РѕРІ РЅР° СЂРµРїРѕ
-MAX_CODE_TOKENS = 400        # Р»РёРјРёС‚ РґР»РёРЅС‹ РєРѕРґР° (РІ СЃР»РѕРІР°С…)
-MAX_WORKERS = 16             # РїРѕС‚РѕРєРё РґР»СЏ РєР»РѕРЅРёСЂРѕРІР°РЅРёСЏ
-SAVE_EVERY = 500              # РєР°Р¶РґС‹Рµ N СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ СЃРѕС…СЂР°РЅСЏС‚СЊ С‡РµРєРїРѕРёРЅС‚
-SLEEP_BETWEEN_PAGES = 1.2    # РїР°СѓР·Р° РјРµР¶РґСѓ Р·Р°РїСЂРѕСЃР°РјРё
+REPOS_TARGET = 10000          # сколько репозиториев обработать
+PER_PAGE = 1000               # максимум 100
+PAGES = 10                   # максимум 10 (1000 репозиториев)
+MAX_FILES_PER_REPO = 100     # максимум .py файлов на репо
+MAX_CODE_TOKENS = 400        # лимит длины кода (в словах)
+MAX_WORKERS = 16             # потоки для клонирования
+SAVE_EVERY = 500              # каждые N репозиториев сохранять чекпоинт
+SLEEP_BETWEEN_PAGES = 1.2    # пауза между запросами
 LANGUAGE = "python"
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-# ========== Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅС‹Рµ С„СѓРЅРєС†РёРё ==========
+# ========== Вспомогательные функции ==========
 
 def rotate_token(index: int) -> str:
     return TOKENS[index % len(TOKENS)]
@@ -62,7 +62,7 @@ def safe_detect_lang(text: str) -> str:
     except Exception:
         return "unknown"
 
-# ========== РР·РІР»РµС‡РµРЅРёРµ С„СѓРЅРєС†РёР№ РёР· С„Р°Р№Р»Р° ==========
+# ========== Извлечение функций из файла ==========
 def extract_functions_from_file(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -98,7 +98,7 @@ def extract_functions_from_file(file_path):
             })
     return entries
 
-# ========== РљР»РѕРЅРёСЂРѕРІР°РЅРёРµ Рё РїР°СЂСЃРёРЅРі СЂРµРїРѕР·РёС‚РѕСЂРёСЏ ==========
+# ========== Клонирование и парсинг репозитория ==========
 def process_repository_clone(repo_url):
     results = []
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -128,7 +128,7 @@ def process_repository_clone(repo_url):
                 break
     return results
 
-# ========== РђСЃРёРЅС…СЂРѕРЅРЅС‹Р№ СЃР±РѕСЂ URL СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ ==========
+# ========== Асинхронный сбор URL репозиториев ==========
 async def fetch_repos(session, page, token):
     headers = {"Authorization": f"token {token}"}
     q = f"language:{LANGUAGE}+stars:>1"
@@ -137,12 +137,12 @@ async def fetch_repos(session, page, token):
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
             text = await resp.text()
-            print(f"вљ пёЏ РћС€РёР±РєР° {resp.status} РїСЂРё Р·Р°РіСЂСѓР·РєРµ СЃС‚СЂР°РЅРёС†С‹ {page}: {text[:100]}")
+            print(f"⚠️ Ошибка {resp.status} при загрузке страницы {page}: {text[:100]}")
             if resp.status == 403:
                 reset = resp.headers.get("X-RateLimit-Reset")
                 if reset:
                     sleep_for = max(10, int(reset) - int(time.time()) + 5)
-                    print(f"вЏі РџСЂРµРІС‹С€РµРЅ Р»РёРјРёС‚. РћР¶РёРґР°РЅРёРµ {sleep_for} СЃРµРє...")
+                    print(f"⏳ Превышен лимит. Ожидание {sleep_for} сек...")
                     await asyncio.sleep(sleep_for)
                     return []
             return []
@@ -165,11 +165,11 @@ async def gather_repo_urls(target_count=REPOS_TARGET):
                 break
     return repo_urls[:target_count]
 
-# ========== РћСЃРЅРѕРІРЅРѕР№ workflow ==========
+# ========== Основной workflow ==========
 async def main():
-    print("рџ”№ РќР°С‡РёРЅР°РµРј СЃР±РѕСЂ СЃРїРёСЃРєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ...")
+    print("🔹 Начинаем сбор списка репозиториев...")
     repo_urls = await gather_repo_urls(REPOS_TARGET)
-    print(f"вњ… РќР°Р№РґРµРЅРѕ {len(repo_urls)} СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ.")
+    print(f"✅ Найдено {len(repo_urls)} репозиториев.")
 
     processed_repos_file = os.path.join(CHECKPOINT_DIR, "processed_repos.jsonl")
     processed_set = set()
@@ -183,7 +183,7 @@ async def main():
                     continue
 
     to_process = [u for u in repo_urls if u not in processed_set]
-    print(f"рџљЂ Рљ РѕР±СЂР°Р±РѕС‚РєРµ: {len(to_process)} (РїСЂРѕРїСѓС‰РµРЅРѕ {len(repo_urls) - len(to_process)} СѓР¶Рµ СЃРѕР±СЂР°РЅРЅС‹С…).")
+    print(f"🚀 К обработке: {len(to_process)} (пропущено {len(repo_urls) - len(to_process)} уже собранных).")
 
     accumulated = []
     partial_parquet = os.path.join(CHECKPOINT_DIR, "partial_results.parquet")
@@ -191,9 +191,9 @@ async def main():
         try:
             df_existing = pd.read_parquet(partial_parquet)
             accumulated = df_existing.to_dict(orient="records")
-            print(f"рџ“‚ Р—Р°РіСЂСѓР¶РµРЅРѕ {len(accumulated)} Р·Р°РїРёСЃРµР№ РёР· checkpoint.")
+            print(f"📂 Загружено {len(accumulated)} записей из checkpoint.")
         except Exception:
-            print("вљ пёЏ РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё checkpoint, РЅР°С‡РёРЅР°РµРј Р·Р°РЅРѕРІРѕ.")
+            print("⚠️ Ошибка загрузки checkpoint, начинаем заново.")
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = []
@@ -201,7 +201,7 @@ async def main():
             futures.append((repo_url, executor.submit(process_repository_clone, repo_url)))
 
         processed_counter = 0
-        for repo_url, fut in tqdm(futures, desc="рџ”Ќ РћР±СЂР°Р±РѕС‚РєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ"):
+        for repo_url, fut in tqdm(futures, desc="🔍 Обработка репозиториев"):
             try:
                 result = fut.result()
             except Exception:
@@ -218,15 +218,15 @@ async def main():
                 if not df.empty:
                     df = df.drop_duplicates(subset=["code"])
                     df.to_parquet(partial_parquet, index=False)
-                    print(f"рџ’ѕ Checkpoint: СЃРѕС…СЂР°РЅРµРЅРѕ {len(df)} Р·Р°РїРёСЃРµР№.")
+                    print(f"💾 Checkpoint: сохранено {len(df)} записей.")
 
     df_final = pd.DataFrame(accumulated)
     if not df_final.empty:
         df_final = df_final.drop_duplicates(subset=["code"])
         df_final.to_parquet(OUTPUT_FILE, index=False)
-        print(f"вњ… Р“РѕС‚РѕРІРѕ. РЎРѕС…СЂР°РЅРµРЅРѕ {len(df_final)} Р·Р°РїРёСЃРµР№ РІ {OUTPUT_FILE}")
+        print(f"✅ Готово. Сохранено {len(df_final)} записей в {OUTPUT_FILE}")
     else:
-        print("вљ пёЏ РќРµ РЅР°Р№РґРµРЅРѕ С„СѓРЅРєС†РёР№. РџСЂРѕРІРµСЂСЊ С„РёР»СЊС‚СЂС‹ РёР»Рё С‚РѕРєРµРЅС‹.")
+        print("⚠️ Не найдено функций. Проверь фильтры или токены.")
 
 if __name__ == "__main__":
     asyncio.run(main())

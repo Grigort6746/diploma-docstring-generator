@@ -1,23 +1,23 @@
-﻿%%{init: {'theme': 'default', 'themeVariables': { 'background': '#FFFFFF' }}}%%
+%%{init: {'theme': 'default', 'themeVariables': { 'background': '#FFFFFF' }}}%%
 flowchart LR
-    A[РќР°С‡Р°Р»Рѕ] --> B[РџРѕРёСЃРє Python-СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ РЅР° GitHub]
+    A[Начало] --> B[Поиск Python-репозиториев на GitHub]
 
-    B --> C[РљР»РѕРЅРёСЂРѕРІР°РЅРёРµ Рё РѕР±С…РѕРґ .py]
+    B --> C[Клонирование и обход .py]
 
-    C --> D[РџР°СЂСЃРёРЅРі AST в†’ С„СѓРЅРєС†РёРё]
+    C --> D[Парсинг AST → функции]
 
-    D --> E{РџСЂРѕРІРµСЂРєРё: Google-style docstring РЇР·С‹Рє: en Р”Р»РёРЅР°}
+    D --> E{Проверки: Google-style docstring Язык: en Длина}
 
-    E -- РќРµС‚ --> F[РџСЂРѕРїСѓСЃРє]
-    E -- Р”Р° --> G[РЎРѕС…СЂР°РЅРµРЅРёРµ РїР°СЂС‹ РєРѕРґ вЂ” docstring]
+    E -- Нет --> F[Пропуск]
+    E -- Да --> G[Сохранение пары код — docstring]
 
-    F --> H{Р•С‰С‘ С„СѓРЅРєС†РёРё РёР»Рё СЂРµРїРѕР·РёС‚РѕСЂРёРё?}
+    F --> H{Ещё функции или репозитории?}
     G --> H
 
-    H -- Р”Р° --> D
-    H -- РќРµС‚ --> I[Р—Р°РїРёСЃСЊ РІ .parquet]
+    H -- Да --> D
+    H -- Нет --> I[Запись в .parquet]
 
-    I --> J[РљРѕРЅРµС†]
+    I --> J[Конец]
 
     style A fill:#4CAF50,stroke:#333,color:white
     style J fill:#F44336,stroke:#333,color:white

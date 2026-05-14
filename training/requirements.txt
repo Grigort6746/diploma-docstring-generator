@@ -1,4 +1,4 @@
-﻿# CUDA-enabled PyTorch wheels for NVIDIA GPUs.
+# CUDA-enabled PyTorch wheels for NVIDIA GPUs.
 --extra-index-url https://download.pytorch.org/whl/cu126
 
 absl-py==2.3.1

@@ -1,4 +1,4 @@
-﻿# Docstring Training V2
+# Docstring Training V2
 
 Clean pipeline for training a Python code-to-docstring model.
 

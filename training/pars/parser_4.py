@@ -1,14 +1,14 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 collect_github_dataset_v3.py
 ---------------------------------
-РђСЃРёРЅС…СЂРѕРЅРЅС‹Р№ СЃР±РѕСЂ Python-СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ СЃ GitHub.
-РР·РІР»РµС‡РµРЅРёРµ С„СѓРЅРєС†РёР№ СЃ Google-style docstrings.
-РџРѕРґРґРµСЂР¶РєР°:
-- Р РѕС‚Р°С†РёСЏ С‚РѕРєРµРЅРѕРІ
-- РџР°РіРёРЅР°С†РёСЏ + СЂР°Р·РЅС‹Рµ РґРёР°РїР°Р·РѕРЅС‹ stars
-- РџСЂРѕРїСѓСЃРє СѓР¶Рµ СЃРѕР±СЂР°РЅРЅС‹С… СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ
-- РџСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ
+Асинхронный сбор Python-репозиториев с GitHub.
+Извлечение функций с Google-style docstrings.
+Поддержка:
+- Ротация токенов
+- Пагинация + разные диапазоны stars
+- Пропуск уже собранных репозиториев
+- Промежуточные сохранения
 """
 
 import os
@@ -25,9 +25,9 @@ from langdetect import detect, DetectorFactory
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
-DetectorFactory.seed = 0  # СЃС‚Р°Р±РёР»СЊРЅРѕСЃС‚СЊ langdetect
+DetectorFactory.seed = 0  # стабильность langdetect
 
-# ========== РќРђРЎРўР РћР™РљР ==========
+# ========== НАСТРОЙКИ ==========
 
 TOKENS = [
     token.strip()
@@ -40,19 +40,19 @@ if not TOKENS:
 
 OUTPUT_FILE = "functions_with_docstrings_4.parquet"
 CHECKPOINT_DIR = "checkpoints"
-REPOS_TARGET = 1000          # СЃРєРѕР»СЊРєРѕ СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ
-PER_PAGE = 100               # РјР°РєСЃРёРјСѓРј 100
-PAGES = 10                   # РјР°РєСЃРёРјСѓРј 10 (1000 СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ)
-MAX_FILES_PER_REPO = 100     # РјР°РєСЃРёРјСѓРј .py С„Р°Р№Р»РѕРІ
-MAX_CODE_TOKENS = 300        # Р»РёРјРёС‚ СЃР»РѕРІ РІ РєРѕРґРµ
-MAX_WORKERS = 12             # РїРѕС‚РѕРєРё РґР»СЏ РєР»РѕРЅРёСЂРѕРІР°РЅРёСЏ
-SAVE_EVERY = 100             # СЃРѕС…СЂР°РЅСЏС‚СЊ РєР°Р¶РґС‹Рµ N СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ
-SLEEP_BETWEEN_PAGES = 1.2    # РїР°СѓР·Р° РјРµР¶РґСѓ Р·Р°РїСЂРѕСЃР°РјРё
+REPOS_TARGET = 1000          # сколько репозиториев обработать
+PER_PAGE = 100               # максимум 100
+PAGES = 10                   # максимум 10 (1000 репозиториев)
+MAX_FILES_PER_REPO = 100     # максимум .py файлов
+MAX_CODE_TOKENS = 300        # лимит слов в коде
+MAX_WORKERS = 12             # потоки для клонирования
+SAVE_EVERY = 100             # сохранять каждые N репозиториев
+SLEEP_BETWEEN_PAGES = 1.2    # пауза между запросами
 LANGUAGE = "python"
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-# ========== Р’РЎРџРћРњРћР“РђРўР•Р›Р¬РќР«Р• Р¤РЈРќРљР¦РР ==========
+# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
 def rotate_token(index: int) -> str:
     return TOKENS[index % len(TOKENS)]
@@ -66,7 +66,7 @@ def safe_detect_lang(text: str) -> str:
     except Exception:
         return "unknown"
 
-# ========== РР—Р’Р›Р•Р§Р•РќРР• Р¤РЈРќРљР¦РР™ РР— Р¤РђР™Р›Рђ ==========
+# ========== ИЗВЛЕЧЕНИЕ ФУНКЦИЙ ИЗ ФАЙЛА ==========
 
 def extract_functions_from_file(file_path):
     try:
@@ -102,7 +102,7 @@ def extract_functions_from_file(file_path):
             })
     return entries
 
-# ========== РљР›РћРќРР РћР’РђРќРР• Р РџРђР РЎРРќР“ Р Р•РџРћР—РРўРћР РРЇ ==========
+# ========== КЛОНИРОВАНИЕ И ПАРСИНГ РЕПОЗИТОРИЯ ==========
 
 def process_repository_clone(repo_url):
     results = []
@@ -133,10 +133,10 @@ def process_repository_clone(repo_url):
                 break
     return results
 
-# ========== РЎР‘РћР  URL Р Р•РџРћР—РРўРћР РР•Р’ (СЃ РґРёР°РїР°Р·РѕРЅР°РјРё stars) ==========
+# ========== СБОР URL РЕПОЗИТОРИЕВ (с диапазонами stars) ==========
 
 def generate_star_queries():
-    """Р Р°Р·РЅС‹Рµ РґРёР°РїР°Р·РѕРЅС‹ РїРѕРїСѓР»СЏСЂРЅРѕСЃС‚Рё, С‡С‚РѕР±С‹ РѕР±РѕР№С‚Рё Р»РёРјРёС‚ 1000 СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ."""
+    """Разные диапазоны популярности, чтобы обойти лимит 1000 результатов."""
     return [
         "stars:>5000",
         "stars:1000..5000",
@@ -158,12 +158,12 @@ async def fetch_repos_for_query(session, query, page, token):
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
             text = await resp.text()
-            print(f"вљ пёЏ РћС€РёР±РєР° {resp.status} РґР»СЏ {query}, СЃС‚СЂ. {page}: {text[:100]}")
+            print(f"⚠️ Ошибка {resp.status} для {query}, стр. {page}: {text[:100]}")
             if resp.status == 403:
                 reset = resp.headers.get("X-RateLimit-Reset")
                 if reset:
                     sleep_for = max(10, int(reset) - int(time.time()) + 5)
-                    print(f"вЏі РџСЂРµРІС‹С€РµРЅ Р»РёРјРёС‚. Р–РґС‘Рј {sleep_for} СЃРµРє...")
+                    print(f"⏳ Превышен лимит. Ждём {sleep_for} сек...")
                     await asyncio.sleep(sleep_for)
                     return []
             return []
@@ -192,10 +192,10 @@ async def gather_repo_urls_with_queries(processed_set, target_count=REPOS_TARGET
             await asyncio.sleep(0.5)
     return found[:target_count]
 
-# ========== РћРЎРќРћР’РќРћР™ WORKFLOW ==========
+# ========== ОСНОВНОЙ WORKFLOW ==========
 
 async def main():
-    print("рџ”№ РќР°С‡РёРЅР°РµРј СЃР±РѕСЂ СЃРїРёСЃРєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ...")
+    print("🔹 Начинаем сбор списка репозиториев...")
 
     processed_repos_file = os.path.join(CHECKPOINT_DIR, "processed_repos.jsonl")
     processed_set = set()
@@ -207,10 +207,10 @@ async def main():
                     processed_set.add(rec.get("repo_url"))
                 except Exception:
                     continue
-    print(f"рџ“¦ РЈР¶Рµ СЃРѕР±СЂР°РЅРѕ {len(processed_set)} СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ (Р±СѓРґСѓС‚ РїСЂРѕРїСѓС‰РµРЅС‹).")
+    print(f"📦 Уже собрано {len(processed_set)} репозиториев (будут пропущены).")
 
     repo_urls = await gather_repo_urls_with_queries(processed_set, REPOS_TARGET)
-    print(f"вњ… РќР°Р№РґРµРЅРѕ {len(repo_urls)} РЅРѕРІС‹С… СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё.")
+    print(f"✅ Найдено {len(repo_urls)} новых репозиториев для обработки.")
 
     accumulated = []
     partial_parquet = os.path.join(CHECKPOINT_DIR, "partial_results.parquet")
@@ -218,15 +218,15 @@ async def main():
         try:
             df_existing = pd.read_parquet(partial_parquet)
             accumulated = df_existing.to_dict(orient="records")
-            print(f"рџ“‚ Р—Р°РіСЂСѓР¶РµРЅРѕ {len(accumulated)} Р·Р°РїРёСЃРµР№ РёР· checkpoint.")
+            print(f"📂 Загружено {len(accumulated)} записей из checkpoint.")
         except Exception:
-            print("вљ пёЏ РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё checkpoint, РЅР°С‡РёРЅР°РµРј Р·Р°РЅРѕРІРѕ.")
+            print("⚠️ Ошибка загрузки checkpoint, начинаем заново.")
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [(repo_url, executor.submit(process_repository_clone, repo_url)) for repo_url in repo_urls]
 
         processed_counter = 0
-        for repo_url, fut in tqdm(futures, desc="рџ”Ќ РћР±СЂР°Р±РѕС‚РєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ"):
+        for repo_url, fut in tqdm(futures, desc="🔍 Обработка репозиториев"):
             try:
                 result = fut.result()
             except Exception:
@@ -243,15 +243,15 @@ async def main():
                 if not df.empty:
                     df = df.drop_duplicates(subset=["code"])
                     df.to_parquet(partial_parquet, index=False)
-                    print(f"рџ’ѕ Checkpoint: СЃРѕС…СЂР°РЅРµРЅРѕ {len(df)} Р·Р°РїРёСЃРµР№.")
+                    print(f"💾 Checkpoint: сохранено {len(df)} записей.")
 
     df_final = pd.DataFrame(accumulated)
     if not df_final.empty:
         df_final = df_final.drop_duplicates(subset=["code"])
         df_final.to_parquet(OUTPUT_FILE, index=False)
-        print(f"вњ… Р“РѕС‚РѕРІРѕ. РЎРѕС…СЂР°РЅРµРЅРѕ {len(df_final)} Р·Р°РїРёСЃРµР№ РІ {OUTPUT_FILE}")
+        print(f"✅ Готово. Сохранено {len(df_final)} записей в {OUTPUT_FILE}")
     else:
-        print("вљ пёЏ РќРµ РЅР°Р№РґРµРЅРѕ С„СѓРЅРєС†РёР№. РџСЂРѕРІРµСЂСЊ С„РёР»СЊС‚СЂС‹ РёР»Рё С‚РѕРєРµРЅС‹.")
+        print("⚠️ Не найдено функций. Проверь фильтры или токены.")
 
 if __name__ == "__main__":
     asyncio.run(main())

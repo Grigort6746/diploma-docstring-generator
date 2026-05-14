@@ -1,4 +1,4 @@
-﻿import os
+import os
 import re
 import ast
 import tempfile
@@ -10,25 +10,25 @@ from git import Repo
 from langdetect import detect, DetectorFactory
 from concurrent.futures import ThreadPoolExecutor
 
-DetectorFactory.seed = 0  # СЃС‚Р°Р±РёР»СЊРЅРѕСЃС‚СЊ РґРµС‚РµРєС†РёРё СЏР·С‹РєР°
+DetectorFactory.seed = 0  # стабильность детекции языка
 
-# === РќРђРЎРўР РћР™РљР ===
+# === НАСТРОЙКИ ===
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 OUTPUT_FILE = "functions_with_docstrings.parquet"
-REPOS_LIMIT = 20000          # РѕР±С‰РµРµ РєРѕР»РёС‡РµСЃС‚РІРѕ СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё
-MAX_FILES_PER_REPO = 100   # РјР°РєСЃРёРјСѓРј Python-С„Р°Р№Р»РѕРІ РёР· РѕРґРЅРѕРіРѕ СЂРµРїРѕ
-MAX_WORKERS = 16           # РєРѕР»РёС‡РµСЃС‚РІРѕ РїРѕС‚РѕРєРѕРІ РґР»СЏ РїР°СЂСЃРёРЅРіР°
-MAX_CODE_TOKENS = 600      # РѕРіСЂР°РЅРёС‡РµРЅРёРµ РїРѕ РґР»РёРЅРµ С„СѓРЅРєС†РёРё
-PAGES = 200                 # РєРѕР»РёС‡РµСЃС‚РІРѕ СЃС‚СЂР°РЅРёС† GitHub API (РґРѕ 1000 СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ)
+REPOS_LIMIT = 20000          # общее количество репозиториев для обработки
+MAX_FILES_PER_REPO = 100   # максимум Python-файлов из одного репо
+MAX_WORKERS = 16           # количество потоков для парсинга
+MAX_CODE_TOKENS = 600      # ограничение по длине функции
+PAGES = 200                 # количество страниц GitHub API (до 1000 репозиториев)
 
-# === 1. РџСЂРѕРІРµСЂРєР° Google-style docstring ===
+# === 1. Проверка Google-style docstring ===
 def is_google_style_docstring(docstring: str) -> bool:
     if not docstring:
         return False
     docstring = docstring.strip()
     return "Args:" in docstring and "Returns:" in docstring
 
-# === 2. РР·РІР»РµС‡РµРЅРёРµ С„СѓРЅРєС†РёР№ РёР· РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р° ===
+# === 2. Извлечение функций из одного файла ===
 def extract_functions(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -44,14 +44,14 @@ def extract_functions(file_path):
             if not (doc and is_google_style_docstring(doc)):
                 continue
 
-            # РџСЂРѕРІРµСЂСЏРµРј СЏР·С‹Рє docstring
+            # Проверяем язык docstring
             try:
                 if detect(doc) != "en":
                     continue
             except Exception:
                 continue
 
-            # РџРѕР»СѓС‡Р°РµРј РєРѕРґ С„СѓРЅРєС†РёРё
+            # Получаем код функции
             try:
                 code = ast.get_source_segment(src, node)
                 if not code or len(code.split()) > MAX_CODE_TOKENS:
@@ -66,9 +66,9 @@ def extract_functions(file_path):
                 continue
     return results
 
-# === 3. РђСЃРёРЅС…СЂРѕРЅРЅР°СЏ Р·Р°РіСЂСѓР·РєР° СЃРїРёСЃРєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ СЃ GitHub ===
+# === 3. Асинхронная загрузка списка репозиториев с GitHub ===
 async def fetch_repo_urls(pages: int = PAGES, per_page: int = 100):
-    """РђСЃРёРЅС…СЂРѕРЅРЅРѕ РїРѕР»СѓС‡Р°РµС‚ РґРѕ 1000 Python-СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ РїРѕ Р·РІС‘Р·РґР°Рј."""
+    """Асинхронно получает до 1000 Python-репозиториев по звёздам."""
     if not GITHUB_TOKEN:
         raise RuntimeError("Set the GITHUB_TOKEN environment variable before running this script.")
 
@@ -84,17 +84,17 @@ async def fetch_repo_urls(pages: int = PAGES, per_page: int = 100):
             )
             async with session.get(api_url) as resp:
                 if resp.status != 200:
-                    print(f"вљ пёЏ РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё СЃС‚СЂР°РЅРёС†С‹ {page}: {resp.status}")
+                    print(f"⚠️ Ошибка загрузки страницы {page}: {resp.status}")
                     continue
                 data = await resp.json()
                 new_urls = [item["clone_url"] for item in data.get("items", [])]
                 urls.extend(new_urls)
-                await asyncio.sleep(2)  # РїР°СѓР·Р° РґР»СЏ РёР·Р±РµР¶Р°РЅРёСЏ rate limit
+                await asyncio.sleep(2)  # пауза для избежания rate limit
 
-    print(f"рџ”Ќ РќР°Р№РґРµРЅРѕ {len(urls)} СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ")
+    print(f"🔍 Найдено {len(urls)} репозиториев")
     return urls[:REPOS_LIMIT]
 
-# === 4. РџР°СЂСЃРёРЅРі РѕРґРЅРѕРіРѕ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ ===
+# === 4. Парсинг одного репозитория ===
 def process_repository(repo_url):
     results = []
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -117,7 +117,7 @@ def process_repository(repo_url):
 
     return results
 
-# === 5. РђСЃРёРЅС…СЂРѕРЅРЅС‹Р№ СЃР±РѕСЂ РґР°РЅРЅС‹С… ===
+# === 5. Асинхронный сбор данных ===
 async def collect_from_github():
     repo_urls = await fetch_repo_urls()
     all_data = []
@@ -126,7 +126,7 @@ async def collect_from_github():
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         tasks = [loop.run_in_executor(executor, process_repository, url) for url in repo_urls]
 
-        for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="вљ™пёЏ РћР±СЂР°Р±РѕС‚РєР° СЂРµРїРѕР·РёС‚РѕСЂРёРµРІ"):
+        for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="⚙️ Обработка репозиториев"):
             try:
                 result = await future
                 all_data.extend(result)
@@ -135,19 +135,19 @@ async def collect_from_github():
 
     return all_data
 
-# === 6. РћСЃРЅРѕРІРЅР°СЏ С„СѓРЅРєС†РёСЏ ===
+# === 6. Основная функция ===
 async def main():
     data = await collect_from_github()
-    print(f"вњ… РЎРѕР±СЂР°РЅРѕ {len(data)} С„СѓРЅРєС†РёР№ СЃ Google-style docstring (EN)")
+    print(f"✅ Собрано {len(data)} функций с Google-style docstring (EN)")
 
     if not data:
-        print("вќЊ РќРµС‚ РґР°РЅРЅС‹С…. РџСЂРѕРІРµСЂСЊ С‚РѕРєРµРЅ РёР»Рё РёРЅС‚РµСЂРЅРµС‚.")
+        print("❌ Нет данных. Проверь токен или интернет.")
         return
 
     df = pd.DataFrame(data)
     df.drop_duplicates(subset=["code"], inplace=True)
     df.to_parquet(OUTPUT_FILE, index=False)
-    print(f"рџ’ѕ РЎРѕС…СЂР°РЅРµРЅРѕ РІ {OUTPUT_FILE}")
+    print(f"💾 Сохранено в {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     asyncio.run(main())

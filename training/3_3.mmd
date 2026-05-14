@@ -1,17 +1,17 @@
-﻿%%{init: {'theme': 'default', 'themeVariables': { 'background': '#FFFFFF' }}}%%
+%%{init: {'theme': 'default', 'themeVariables': { 'background': '#FFFFFF' }}}%%
 flowchart LR
-    %% Р’С…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ
-    A["Data Layer (.parquet С„Р°Р№Р»С‹: РєРѕРґ + docstring)"]
+    %% Входные данные
+    A["Data Layer (.parquet файлы: код + docstring)"]
 
-    %% РћСЃРЅРѕРІРЅС‹Рµ РєРѕРјРїРѕРЅРµРЅС‚С‹
-    B["T5Tokenizer (С‚РѕРєРµРЅРёР·Р°С†РёСЏ РєРѕРґР° Рё docstring)"]
+    %% Основные компоненты
+    B["T5Tokenizer (токенизация кода и docstring)"]
     C["CodeT5 Model (Encoder-Decoder Transformer)"]
-    D["Seq2SeqTrainer (С†РёРєР» РѕР±СѓС‡РµРЅРёСЏ, loss, С‡РµРєРїРѕРёРЅС‚С‹)"]
+    D["Seq2SeqTrainer (цикл обучения, loss, чекпоинты)"]
     E["Evaluator (BLEU, ROUGE, evaluate)"]
     F["Model Storage (pytorch_model.bin config.json tokenizer.json)"]
-    G["Р›РѕРіРёСЂРѕРІР°РЅРёРµ (trainer_state.json Р»РѕРіРё, РјРµС‚СЂРёРєРё)"]
+    G["Логирование (trainer_state.json логи, метрики)"]
 
-    %% РЎРІСЏР·Рё
+    %% Связи
     A --> B
     B --> C
     C --> D
@@ -19,9 +19,9 @@ flowchart LR
     D --> G
     D --> F
     E --> G
-    F -.->|Р—Р°РіСЂСѓР·РєР° РїСЂРё РёРЅС„РµСЂРµРЅСЃРµ| C
+    F -.->|Загрузка при инференсе| C
 
-    %% === Р¦Р’Р•РўРђ: РІС‹СЃРѕРєР°СЏ С‡РёС‚Р°РµРјРѕСЃС‚СЊ, WCAG ===
+    %% === ЦВЕТА: высокая читаемость, WCAG ===
     style A fill:#E8F5E9,stroke:#1B5E20,stroke-width:2px,color:#000
     style B fill:#FFF8E1,stroke:#FF6F00,stroke-width:2px,color:#000
     style C fill:#E1F5FE,stroke:#0277BD,stroke-width:3px,color:#000

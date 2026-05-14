@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import scrolledtext, messagebox
 from transformers import T5ForConditionalGeneration, AutoTokenizer
 import threading
@@ -6,17 +6,17 @@ import threading
 class DocstringGeneratorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Р“РµРЅРµСЂР°С‚РѕСЂ Docstring")
+        self.root.title("Генератор Docstring")
         self.root.geometry("800x600")
 
-        # Р—Р°РіСЂСѓР·РєР° РјРѕРґРµР»Рё
+        # Загрузка модели
         self.setup_model()
 
-        # РЎРѕР·РґР°РЅРёРµ РёРЅС‚РµСЂС„РµР№СЃР°
+        # Создание интерфейса
         self.create_widgets()
 
     def setup_model(self):
-        """Р—Р°РіСЂСѓР·РєР° РјРѕРґРµР»Рё РІ РѕС‚РґРµР»СЊРЅРѕРј РїРѕС‚РѕРєРµ"""
+        """Загрузка модели в отдельном потоке"""
         self.model_loaded = False
         self.tokenizer = None
         self.model = None
@@ -25,28 +25,28 @@ class DocstringGeneratorApp:
         loading_thread.start()
 
     def load_model_thread(self):
-        """РџРѕС‚РѕРє РґР»СЏ Р·Р°РіСЂСѓР·РєРё РјРѕРґРµР»Рё"""
+        """Поток для загрузки модели"""
         try:
             model_path = "git_model"
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
             self.model = T5ForConditionalGeneration.from_pretrained(model_path)
             self.model_loaded = True
-            print("РњРѕРґРµР»СЊ Р·Р°РіСЂСѓР¶РµРЅР° СѓСЃРїРµС€РЅРѕ")
+            print("Модель загружена успешно")
         except Exception as e:
-            print(f"РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РјРѕРґРµР»Рё: {e}")
+            print(f"Ошибка загрузки модели: {e}")
 
     def create_widgets(self):
-        # Р—Р°РіРѕР»РѕРІРѕРє
+        # Заголовок
         title_label = tk.Label(
             self.root,
-            text="Р“РµРЅРµСЂР°С‚РѕСЂ Docstring РґР»СЏ Python РєРѕРґР°",
+            text="Генератор Docstring для Python кода",
             font=("Arial", 16, "bold"),
             pady=10
         )
         title_label.pack()
 
-        # РџРѕР»Рµ РІРІРѕРґР° РєРѕРґР° (РјРЅРѕРіРѕСЃС‚СЂРѕС‡РЅРѕРµ)
-        tk.Label(self.root, text="Р’РІРµРґРёС‚Рµ РїРѕР»РЅС‹Р№ РєРѕРґ С„СѓРЅРєС†РёРё:", font=("Arial", 12)).pack(pady=10)
+        # Поле ввода кода (многострочное)
+        tk.Label(self.root, text="Введите полный код функции:", font=("Arial", 12)).pack(pady=10)
 
         self.code_text = scrolledtext.ScrolledText(
             self.root,
@@ -59,14 +59,14 @@ class DocstringGeneratorApp:
         )
         self.code_text.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
 
-        # РљРЅРѕРїРєРё РїСЂРёРјРµСЂРѕРІ
+        # Кнопки примеров
         examples_frame = tk.Frame(self.root)
         examples_frame.pack(pady=10)
 
-        # РџСЂРёРјРµСЂС‹ РїРѕР»РЅС‹С… С„СѓРЅРєС†РёР№
+        # Примеры полных функций
         examples = [
             {
-                "name": "Р¤СѓРЅРєС†РёСЏ match1",
+                "name": "Функция match1",
                 "code": '''def match1(text, *patterns):
     if len(patterns) == 1:
         pattern = patterns[0]
@@ -84,7 +84,7 @@ class DocstringGeneratorApp:
         return ret'''
             },
             {
-                "name": "РџСЂРѕСЃС‚Р°СЏ С„СѓРЅРєС†РёСЏ",
+                "name": "Простая функция",
                 "code": '''def checkDnsWildcard(self, target: str) -> bool:
     if not target:
         return False
@@ -95,7 +95,7 @@ class DocstringGeneratorApp:
     return True'''
             },
             {
-                "name": "Р¤Р°РєС‚РѕСЂРёР°Р»",
+                "name": "Факториал",
                 "code": '''def calculate_factorial(n):
     if n == 0:
         return 1
@@ -103,7 +103,7 @@ class DocstringGeneratorApp:
         return n * calculate_factorial(n-1)'''
             },
             {
-                "name": "РџРѕРёСЃРє РјР°РєСЃРёРјСѓРјР°",
+                "name": "Поиск максимума",
                 "code": '''def find_max(numbers):
     if not numbers:
         return None
@@ -115,7 +115,7 @@ class DocstringGeneratorApp:
             }
         ]
 
-        # РЎРѕР·РґР°РµРј РєРЅРѕРїРєРё РґР»СЏ РєР°Р¶РґРѕРіРѕ РїСЂРёРјРµСЂР°
+        # Создаем кнопки для каждого примера
         for example in examples:
             btn = tk.Button(
                 examples_frame,
@@ -127,20 +127,20 @@ class DocstringGeneratorApp:
             )
             btn.pack(side=tk.LEFT, padx=5)
 
-        # РљРЅРѕРїРєР° РѕС‡РёСЃС‚РєРё
+        # Кнопка очистки
         clear_btn = tk.Button(
             examples_frame,
-            text="РћС‡РёСЃС‚РёС‚СЊ",
+            text="Очистить",
             command=self.clear_text,
             bg="lightcoral",
             fg="white"
         )
         clear_btn.pack(side=tk.LEFT, padx=5)
 
-        # РљРЅРѕРїРєР° РіРµРЅРµСЂР°С†РёРё
+        # Кнопка генерации
         self.generate_btn = tk.Button(
             self.root,
-            text="рџЋЇ РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ Docstring",
+            text="🎯 Сгенерировать Docstring",
             command=self.generate_docstring,
             bg="#4CAF50",
             fg="white",
@@ -151,11 +151,11 @@ class DocstringGeneratorApp:
         )
         self.generate_btn.pack(pady=15)
 
-        # РџРѕР»Рµ РІС‹РІРѕРґР° СЂРµР·СѓР»СЊС‚Р°С‚Р°
+        # Поле вывода результата
         result_frame = tk.Frame(self.root)
         result_frame.pack(pady=10, fill=tk.BOTH, expand=True, padx=20)
 
-        tk.Label(result_frame, text="РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ docstring:", font=("Arial", 12)).pack(anchor="w")
+        tk.Label(result_frame, text="Сгенерированный docstring:", font=("Arial", 12)).pack(anchor="w")
 
         self.result_text = scrolledtext.ScrolledText(
             result_frame,
@@ -169,117 +169,117 @@ class DocstringGeneratorApp:
         )
         self.result_text.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # РљРЅРѕРїРєР° РєРѕРїРёСЂРѕРІР°РЅРёСЏ
+        # Кнопка копирования
         copy_btn = tk.Button(
             result_frame,
-            text="рџ“‹ РљРѕРїРёСЂРѕРІР°С‚СЊ docstring",
+            text="📋 Копировать docstring",
             command=self.copy_result,
             bg="#2196F3",
             fg="white"
         )
         copy_btn.pack(pady=5)
 
-        # РЎС‚Р°С‚СѓСЃ Р·Р°РіСЂСѓР·РєРё РјРѕРґРµР»Рё
+        # Статус загрузки модели
         self.status_label = tk.Label(
             self.root,
-            text="вЏі Р—Р°РіСЂСѓР·РєР° РјРѕРґРµР»Рё...",
+            text="⏳ Загрузка модели...",
             fg="blue",
             font=("Arial", 10)
         )
         self.status_label.pack(pady=10)
 
-        # РџСЂРѕРІРµСЂРєР° Р·Р°РіСЂСѓР·РєРё РјРѕРґРµР»Рё
+        # Проверка загрузки модели
         self.check_model_loaded()
 
     def insert_example(self, example_code):
-        """Р’СЃС‚Р°РІРєР° РїСЂРёРјРµСЂР° РІ РїРѕР»Рµ РІРІРѕРґР°"""
+        """Вставка примера в поле ввода"""
         self.code_text.delete("1.0", tk.END)
         self.code_text.insert("1.0", example_code)
 
     def clear_text(self):
-        """РћС‡РёСЃС‚РєР° РїРѕР»РµР№ РІРІРѕРґР° Рё РІС‹РІРѕРґР°"""
+        """Очистка полей ввода и вывода"""
         self.code_text.delete("1.0", tk.END)
         self.result_text.delete("1.0", tk.END)
 
     def copy_result(self):
-        """РљРѕРїРёСЂРѕРІР°РЅРёРµ СЂРµР·СѓР»СЊС‚Р°С‚Р° РІ Р±СѓС„РµСЂ РѕР±РјРµРЅР°"""
+        """Копирование результата в буфер обмена"""
         result = self.result_text.get("1.0", tk.END).strip()
         if result:
             self.root.clipboard_clear()
             self.root.clipboard_append(result)
-            messagebox.showinfo("РЈСЃРїРµС…", "Docstring СЃРєРѕРїРёСЂРѕРІР°РЅ РІ Р±СѓС„РµСЂ РѕР±РјРµРЅР°!")
+            messagebox.showinfo("Успех", "Docstring скопирован в буфер обмена!")
 
     def check_model_loaded(self):
-        """РџСЂРѕРІРµСЂРєР° Р·Р°РіСЂСѓР·РєРё РјРѕРґРµР»Рё"""
+        """Проверка загрузки модели"""
         if self.model_loaded:
-            self.status_label.config(text="вњ… РњРѕРґРµР»СЊ Р·Р°РіСЂСѓР¶РµРЅР° Рё РіРѕС‚РѕРІР° Рє СЂР°Р±РѕС‚Рµ!", fg="green")
+            self.status_label.config(text="✅ Модель загружена и готова к работе!", fg="green")
             self.generate_btn.config(state=tk.NORMAL)
         else:
             self.root.after(1000, self.check_model_loaded)
 
     def generate_docstring(self):
-        """Р“РµРЅРµСЂР°С†РёСЏ docstring"""
+        """Генерация docstring"""
         if not self.model_loaded:
-            messagebox.showerror("РћС€РёР±РєР°", "РњРѕРґРµР»СЊ РµС‰Рµ РЅРµ Р·Р°РіСЂСѓР¶РµРЅР°")
+            messagebox.showerror("Ошибка", "Модель еще не загружена")
             return
 
-        # РџРѕР»СѓС‡Р°РµРј РїРѕР»РЅС‹Р№ РєРѕРґ РёР· С‚РµРєСЃС‚РѕРІРѕРіРѕ РїРѕР»СЏ
+        # Получаем полный код из текстового поля
         code = self.code_text.get("1.0", tk.END).strip()
 
         if not code:
-            messagebox.showwarning("РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ", "РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РІРІРµРґРёС‚Рµ РєРѕРґ С„СѓРЅРєС†РёРё")
+            messagebox.showwarning("Предупреждение", "Пожалуйста, введите код функции")
             return
 
-        print(f"Р”Р»РёРЅР° РєРѕРґР° РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё: {len(code)} СЃРёРјРІРѕР»РѕРІ")
-        print(f"РљРѕРґ: {code[:100]}...")  # Р›РѕРіРёСЂСѓРµРј РїРµСЂРІС‹Рµ 100 СЃРёРјРІРѕР»РѕРІ РґР»СЏ РѕС‚Р»Р°РґРєРё
+        print(f"Длина кода для обработки: {len(code)} символов")
+        print(f"Код: {code[:100]}...")  # Логируем первые 100 символов для отладки
 
         try:
-            # РџРѕРєР°Р·С‹РІР°РµРј РёРЅРґРёРєР°С‚РѕСЂ Р·Р°РіСЂСѓР·РєРё
-            self.generate_btn.config(state=tk.DISABLED, text="вЏі Р“РµРЅРµСЂР°С†РёСЏ...")
+            # Показываем индикатор загрузки
+            self.generate_btn.config(state=tk.DISABLED, text="⏳ Генерация...")
             self.result_text.delete("1.0", tk.END)
-            self.result_text.insert("1.0", "Р“РµРЅРµСЂР°С†РёСЏ docstring...")
+            self.result_text.insert("1.0", "Генерация docstring...")
 
-            # Р—Р°РїСѓСЃРєР°РµРј РіРµРЅРµСЂР°С†РёСЋ РІ РѕС‚РґРµР»СЊРЅРѕРј РїРѕС‚РѕРєРµ
+            # Запускаем генерацию в отдельном потоке
             thread = threading.Thread(target=self.generate_thread, args=(code,))
             thread.start()
 
         except Exception as e:
-            messagebox.showerror("РћС€РёР±РєР°", f"РћС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё: {str(e)}")
-            self.generate_btn.config(state=tk.NORMAL, text="рџЋЇ РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ Docstring")
+            messagebox.showerror("Ошибка", f"Ошибка генерации: {str(e)}")
+            self.generate_btn.config(state=tk.NORMAL, text="🎯 Сгенерировать Docstring")
 
     def generate_thread(self, code):
-        """РџРѕС‚РѕРє РґР»СЏ РіРµРЅРµСЂР°С†РёРё"""
+        """Поток для генерации"""
         try:
-            print(f"Р“РµРЅРµСЂРёСЂСѓРµРј docstring РґР»СЏ РєРѕРґР° РґР»РёРЅРѕР№ {len(code)} СЃРёРјРІРѕР»РѕРІ")
+            print(f"Генерируем docstring для кода длиной {len(code)} символов")
 
-            # РџРѕРґРіРѕС‚РѕРІРєР° РІС…РѕРґРЅС‹С… РґР°РЅРЅС‹С…
+            # Подготовка входных данных
             inputs = self.tokenizer(
                 code,
                 return_tensors="pt",
                 truncation=True,
-                max_length=512,  # РЈРІРµР»РёС‡РёР»Рё РјР°РєСЃРёРјР°Р»СЊРЅСѓСЋ РґР»РёРЅСѓ РґР»СЏ РїРѕР»РЅРѕРіРѕ РєРѕРґР°
+                max_length=512,  # Увеличили максимальную длину для полного кода
                 padding=True
             )
 
-            # Р“РµРЅРµСЂР°С†РёСЏ
+            # Генерация
             outputs = self.model.generate(
                 inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
-                max_length=128,  # РЈРІРµР»РёС‡РёР»Рё РґР»СЏ Р±РѕР»РµРµ РїРѕРґСЂРѕР±РЅС‹С… docstring
+                max_length=128,  # Увеличили для более подробных docstring
                 num_beams=5,
                 early_stopping=True,
                 no_repeat_ngram_size=3,
                 pad_token_id=self.tokenizer.pad_token_id
             )
 
-            # Р”РµРєРѕРґРёСЂРѕРІР°РЅРёРµ
+            # Декодирование
             docstring = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-            # РћР±РЅРѕРІР»РµРЅРёРµ РёРЅС‚РµСЂС„РµР№СЃР° РІ РѕСЃРЅРѕРІРЅРѕРј РїРѕС‚РѕРєРµ
+            # Обновление интерфейса в основном потоке
             self.root.after(0, self.update_result, docstring)
 
         except Exception as e:
-            error_msg = f"РћС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё: {str(e)}"
+            error_msg = f"Ошибка генерации: {str(e)}"
             print(error_msg)
             self.root.after(0, lambda: self.show_error(error_msg))
 
@@ -287,23 +287,23 @@ class DocstringGeneratorApp:
             self.root.after(0, self.enable_generate_button)
 
     def update_result(self, docstring):
-        """РћР±РЅРѕРІР»РµРЅРёРµ СЂРµР·СѓР»СЊС‚Р°С‚Р°"""
+        """Обновление результата"""
         self.result_text.delete("1.0", tk.END)
         formatted_docstring = f'"""{docstring}"""'
         self.result_text.insert("1.0", formatted_docstring)
 
-        # РџРѕРєР°Р·С‹РІР°РµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ СЂРµР·СѓР»СЊС‚Р°С‚Рµ
-        print(f"РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ docstring: {docstring}")
+        # Показываем информацию о результате
+        print(f"Сгенерированный docstring: {docstring}")
 
     def show_error(self, error_msg):
-        """РџРѕРєР°Р·Р°С‚СЊ РѕС€РёР±РєСѓ"""
+        """Показать ошибку"""
         self.result_text.delete("1.0", tk.END)
-        self.result_text.insert("1.0", f"РћС€РёР±РєР°: {error_msg}")
-        messagebox.showerror("РћС€РёР±РєР°", error_msg)
+        self.result_text.insert("1.0", f"Ошибка: {error_msg}")
+        messagebox.showerror("Ошибка", error_msg)
 
     def enable_generate_button(self):
-        """Р’РєР»СЋС‡РµРЅРёРµ РєРЅРѕРїРєРё РіРµРЅРµСЂР°С†РёРё"""
-        self.generate_btn.config(state=tk.NORMAL, text="рџЋЇ РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ Docstring")
+        """Включение кнопки генерации"""
+        self.generate_btn.config(state=tk.NORMAL, text="🎯 Сгенерировать Docstring")
 
 if __name__ == "__main__":
     root = tk.Tk()

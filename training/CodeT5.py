@@ -1,21 +1,21 @@
-﻿"""
+"""
 train_codet5.py
 ====================
-РћР±СѓС‡РµРЅРёРµ РјРѕРґРµР»Рё CodeT5 РґР»СЏ РіРµРЅРµСЂР°С†РёРё РґРѕРєСѓРјРµРЅС‚Р°С†РёРё Рє Python-РєРѕРґСѓ.
+Обучение модели CodeT5 для генерации документации к Python-коду.
 
-РўСЂРµР±РѕРІР°РЅРёСЏ Рє РґР°С‚Р°СЃРµС‚Сѓ (.parquet):
+Требования к датасету (.parquet):
 -------------------------------------
-Р¤РѕСЂРјР°С‚ вЂ” Parquet (.parquet)
-РћР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РєРѕР»РѕРЅРєРё:
-    - 'code'        вЂ” С‚РµРєСЃС‚ С„СѓРЅРєС†РёРё / РєР»Р°СЃСЃР° / С„СЂР°РіРјРµРЅС‚Р° Python-РєРѕРґР°
-    - 'docstring'   вЂ” С‚РµРєСЃС‚РѕРІРѕРµ РѕРїРёСЃР°РЅРёРµ (СЃС‚СЂРѕРєР° РґРѕРєСѓРјРµРЅС‚Р°С†РёРё)
-Р’СЃРµ РґСЂСѓРіРёРµ РєРѕР»РѕРЅРєРё Р±СѓРґСѓС‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СѓРґР°Р»РµРЅС‹
+Формат — Parquet (.parquet)
+Обязательные колонки:
+    - 'code'        — текст функции / класса / фрагмента Python-кода
+    - 'docstring'   — текстовое описание (строка документации)
+Все другие колонки будут автоматически удалены
 
-РџСЂРёРјРµСЂ СЃС‚СЂСѓРєС‚СѓСЂС‹:
+Пример структуры:
 | code                                | docstring                        |
 |------------------------------------|----------------------------------|
-| "def add(a,b): return a+b"         | "Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃСѓРјРјСѓ РґРІСѓС… С‡РёСЃРµР»."   |
-| "def factorial(n): ..."            | "Р’С‹С‡РёСЃР»СЏРµС‚ С„Р°РєС‚РѕСЂРёР°Р» С‡РёСЃР»Р° n."   |
+| "def add(a,b): return a+b"         | "Возвращает сумму двух чисел."   |
+| "def factorial(n): ..."            | "Вычисляет факториал числа n."   |
 
 """
 
@@ -37,39 +37,39 @@ import matplotlib.pyplot as plt
 import json
 
 
-# === 1. Р—Р°РіСЂСѓР·РєР° Рё РїСЂРѕРІРµСЂРєР° РґР°С‚Р°СЃРµС‚Р° ===
+# === 1. Загрузка и проверка датасета ===
 def load_local_dataset(data_path: str) -> Dataset:
     if not os.path.exists(data_path):
-        raise FileNotFoundError(f"вќЊ Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ: {data_path}")
+        raise FileNotFoundError(f"❌ Файл не найден: {data_path}")
 
-    print(f"рџ”№ Р—Р°РіСЂСѓР¶Р°РµРј РґР°С‚Р°СЃРµС‚ РёР· {data_path}")
+    print(f"🔹 Загружаем датасет из {data_path}")
     df = pd.read_parquet(data_path)
-    print(f"рџ“¦ Р—Р°РіСЂСѓР¶РµРЅРѕ {len(df)} СЃС‚СЂРѕРє, РєРѕР»РѕРЅРєРё: {list(df.columns)}")
+    print(f"📦 Загружено {len(df)} строк, колонки: {list(df.columns)}")
 
-    # РџСЂРѕРІРµСЂРєР° Рё С„РёР»СЊС‚СЂР°С†РёСЏ
+    # Проверка и фильтрация
     required_cols = {"code", "docstring"}
     if not required_cols.issubset(df.columns):
         raise ValueError(
-            f"вќЊ Р’ РґР°С‚Р°СЃРµС‚Рµ РґРѕР»Р¶РЅС‹ Р±С‹С‚СЊ РєРѕР»РѕРЅРєРё {required_cols}, РЅР°Р№РґРµРЅРѕ: {set(df.columns)}"
+            f"❌ В датасете должны быть колонки {required_cols}, найдено: {set(df.columns)}"
         )
 
-    # РћСЃС‚Р°РІР»СЏРµРј С‚РѕР»СЊРєРѕ РЅСѓР¶РЅС‹Рµ РєРѕР»РѕРЅРєРё
+    # Оставляем только нужные колонки
     df = df[list(required_cols)]
 
-    # РЈРґР°Р»СЏРµРј РїСѓСЃС‚С‹Рµ Р·РЅР°С‡РµРЅРёСЏ Рё СЃС‚СЂРѕРєРё
+    # Удаляем пустые значения и строки
     df = df.dropna(subset=["code", "docstring"])
     df = df[df["code"].str.strip() != ""]
     df = df[df["docstring"].str.strip() != ""]
 
-    print(f"вњ… РџРѕСЃР»Рµ С„РёР»СЊС‚СЂР°С†РёРё РѕСЃС‚Р°Р»РѕСЃСЊ {len(df)} РїСЂРёРјРµСЂРѕРІ")
+    print(f"✅ После фильтрации осталось {len(df)} примеров")
 
     return Dataset.from_pandas(df)
 
 
-# === 2. РўРѕРєРµРЅРёР·Р°С†РёСЏ ===
+# === 2. Токенизация ===
 def preprocess_function(examples, tokenizer):
     inputs = [
-        "РЎРѕР·РґР°Р№ docstring РґР»СЏ СЃР»РµРґСѓСЋС‰РµР№ С„СѓРЅРєС†РёРё Python:\n" + code
+        "Создай docstring для следующей функции Python:\n" + code
         for code in examples["code"]
     ]
     targets = examples["docstring"]
@@ -84,42 +84,42 @@ def preprocess_function(examples, tokenizer):
     return model_inputs
 
 
-# === 3. Р¤СѓРЅРєС†РёСЏ РґР»СЏ РѕР±СѓС‡РµРЅРёСЏ ===
+# === 3. Функция для обучения ===
 def train_model(data_path: str):
     ds = load_local_dataset(data_path)
 
     torch.set_num_threads(32)
 
-    # Р Р°Р·РґРµР»РµРЅРёРµ РЅР° train/test
+    # Разделение на train/test
     split_ds = ds.train_test_split(test_size=0.1, seed=42)
     dataset = DatasetDict({
         "train": split_ds["train"],
         "test": split_ds["test"]
     })
 
-    print("рџ”№ Р—Р°РіСЂСѓР¶Р°РµРј Р»РѕРєР°Р»СЊРЅС‹Р№ С‚РѕРєРµРЅРёР·Р°С‚РѕСЂ Рё РјРѕРґРµР»СЊ РёР· local-codet5-small...")
+    print("🔹 Загружаем локальный токенизатор и модель из local-codet5-small...")
 
     model_path = "local-codet5-small"
 
-    # Р—Р°РіСЂСѓР¶Р°РµРј С‚РѕРєРµРЅРёР·Р°С‚РѕСЂ Рё РјРѕРґРµР»СЊ Р»РѕРєР°Р»СЊРЅРѕ
+    # Загружаем токенизатор и модель локально
     tokenizer = RobertaTokenizer.from_pretrained(model_path)
     config = T5Config.from_pretrained(model_path)
     model = T5ForConditionalGeneration.from_pretrained(model_path, config=config)
 
-    print("вњ… РњРѕРґРµР»СЊ Рё С‚РѕРєРµРЅРёР·Р°С‚РѕСЂ СѓСЃРїРµС€РЅРѕ Р·Р°РіСЂСѓР¶РµРЅС‹ Р»РѕРєР°Р»СЊРЅРѕ.")
-    # РџСЂРѕРІРµСЂСЏРµРј GPU
+    print("✅ Модель и токенизатор успешно загружены локально.")
+    # Проверяем GPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"рџ’» РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ: {device}")
+    print(f"💻 Используется устройство: {device}")
     if device == "cuda":
         gpu = torch.cuda.get_device_properties(0)
         total_gb = gpu.total_memory / 1024**3
-        print(f"вњ… GPU: {gpu.name} | CUDA: {torch.version.cuda} | VRAM: {total_gb:.1f} GB")
+        print(f"✅ GPU: {gpu.name} | CUDA: {torch.version.cuda} | VRAM: {total_gb:.1f} GB")
     else:
-        print("вљ пёЏ CUDA РЅРµРґРѕСЃС‚СѓРїРЅР°. РџСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ СѓСЃС‚Р°РЅРѕРІР»РµРЅ torch СЃ CUDA, РЅР°РїСЂРёРјРµСЂ torch==2.9.0+cu126.")
+        print("⚠️ CUDA недоступна. Проверьте, что установлен torch с CUDA, например torch==2.9.0+cu126.")
     model.to(device)
 
-    # РўРѕРєРµРЅРёР·Р°С†РёСЏ
-    print("рџ”„ РўРѕРєРµРЅРёР·Р°С†РёСЏ РґР°С‚Р°СЃРµС‚Р°...")
+    # Токенизация
+    print("🔄 Токенизация датасета...")
     tokenized_ds = dataset.map(
         lambda x: preprocess_function(x, tokenizer),
         batched=True,
@@ -127,18 +127,18 @@ def train_model(data_path: str):
     )
 
 
-    # Р—Р°РіСЂСѓР¶Р°РµРј РјРµС‚СЂРёРєРё
+    # Загружаем метрики
     bleu = evaluate.load("bleu")
     rouge = evaluate.load("rouge")
 
     def compute_metrics(eval_preds):
         preds, labels = eval_preds
 
-        # Р Р°СЃРєРѕРґРёСЂСѓРµРј С‚РѕРєРµРЅС‹ РІ С‚РµРєСЃС‚
+        # Раскодируем токены в текст
         decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
         decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-        # РЈР±РёСЂР°РµРј РїСЂРѕР±РµР»С‹ Рё РїСѓСЃС‚С‹Рµ СЃС‚СЂРѕРєРё
+        # Убираем пробелы и пустые строки
         decoded_preds = [p.strip() for p in decoded_preds]
         decoded_labels = [l.strip() for l in decoded_labels]
 
@@ -159,7 +159,7 @@ def train_model(data_path: str):
 
 
 
-    # РџР°СЂР°РјРµС‚СЂС‹ РѕР±СѓС‡РµРЅРёСЏ
+    # Параметры обучения
     training_args = Seq2SeqTrainingArguments(
         output_dir="./git_results",
         evaluation_strategy="epoch",
@@ -186,26 +186,26 @@ def train_model(data_path: str):
         compute_metrics=compute_metrics,
     )
 
-    # РћР±СѓС‡РµРЅРёРµ
-    print("рџљЂ РќР°С‡Р°Р»Рѕ РѕР±СѓС‡РµРЅРёСЏ...")
+    # Обучение
+    print("🚀 Начало обучения...")
     trainer.train()
 
-    # РЎРѕС…СЂР°РЅРµРЅРёРµ
+    # Сохранение
     save_dir = "./git_model"
     trainer.save_model(save_dir)
     tokenizer.save_pretrained(save_dir)
-    print(f"вњ… РњРѕРґРµР»СЊ СЃРѕС…СЂР°РЅРµРЅР° РІ {save_dir}")
+    print(f"✅ Модель сохранена в {save_dir}")
 
     return tokenizer, model
 
 
-# === 4. Р¤СѓРЅРєС†РёСЏ С‚РµСЃС‚РёСЂРѕРІР°РЅРёСЏ РјРѕРґРµР»Рё ===
+# === 4. Функция тестирования модели ===
 def test_model(tokenizer, model):
-    print("\nрџ”Ћ РўРµСЃС‚РёСЂРѕРІР°РЅРёРµ РјРѕРґРµР»Рё: РІРІРµРґРёС‚Рµ Python-РєРѕРґ РґР»СЏ РіРµРЅРµСЂР°С†РёРё docstring.")
-    print("Р’РІРµРґРёС‚Рµ 'exit' РґР»СЏ РІС‹С…РѕРґР°.\n")
+    print("\n🔎 Тестирование модели: введите Python-код для генерации docstring.")
+    print("Введите 'exit' для выхода.\n")
 
     while True:
-        code_snippet = input("рџ’¬ Р’РІРµРґРёС‚Рµ РєРѕРґ: ")
+        code_snippet = input("💬 Введите код: ")
         if code_snippet.strip().lower() == "exit":
             break
 
@@ -221,10 +221,10 @@ def test_model(tokenizer, model):
             outputs = model.generate(**inputs, max_length=64, num_beams=5)
 
         docstring = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        print(f"рџ“ РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ docstring:\n{docstring}\n")
+        print(f"📘 Сгенерированный docstring:\n{docstring}\n")
 
 
-# === 5. Р—Р°РїСѓСЃРє ===
+# === 5. Запуск ===
 if __name__ == "__main__":
     DATA_PATH = "git_dataset.parquet"
 

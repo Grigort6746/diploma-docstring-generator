@@ -12,7 +12,6 @@ C:\Project\torch
 
 - `docstring_training_v2/` - the cleanest current pipeline for dataset preparation, comparison, CodeT5/T5 training, and generation.
 - `pars/` - legacy GitHub dataset collection scripts.
-- `irz/` - small experimental scripts.
 - `*.ipynb`, `*.py`, `*.mmd`, `*.png`, `*.svg` - legacy experiments, diagrams, and research notes.
 
 ## Data And Models

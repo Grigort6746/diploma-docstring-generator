@@ -1,19 +1,52 @@
 # Python Docstring Generator
 
-VS Code extension prototype for generating Python docstrings locally with Ollama.
+VS Code extension для локальной генерации Python docstring через Ollama.
 
-The extension sends selected Python code to a local Ollama server and inserts a generated Google-style docstring into the editor. Source code is processed locally and is not sent to cloud APIs.
+Расширение отправляет выделенную Python-функцию в локальный Ollama REST API, получает Google-style docstring, показывает preview и вставляет результат в редактор. Код пользователя не отправляется в cloud API.
 
-## Requirements
+## Требования
 
-- Visual Studio Code
-- Ollama installed locally
+- Visual Studio Code `1.90.0` или новее.
+- Ollama, установленная отдельно.
+- Интернет для первого скачивания модели.
 
-The extension can start a local Ollama server and download the configured model automatically. If Ollama itself is not installed or not available in `PATH`, the extension shows a guided install message.
+Рекомендуемая модель для демонстрации:
 
-Recommended lightweight model for demonstration: `qwen2.5-coder:1.5b`
+```text
+qwen2.5-coder:1.5b
+```
 
-## Commands
+Важно: расширение не устанавливает само приложение Ollama. Оно может запустить уже установленный `ollama serve`, скачать выбранную модель через Ollama API и открыть страницу загрузки, если Ollama не найдена.
+
+## Установка из VSIX
+
+Файл пакета:
+
+```text
+python-docstring-generator-0.0.2.vsix
+```
+
+Через VS Code:
+
+1. Открыть Extensions.
+2. Нажать `...`.
+3. Выбрать `Install from VSIX...`.
+4. Указать `python-docstring-generator-0.0.2.vsix`.
+5. Перезапустить VS Code.
+
+Через терминал:
+
+```bash
+code --install-extension python-docstring-generator-0.0.2.vsix
+```
+
+После установки запустите:
+
+```text
+Python Docstring Generator: Setup Local Environment
+```
+
+## Команды
 
 - `Python Docstring Generator: Generate Python Docstring`
 - `Python Docstring Generator: Regenerate Python Docstring`
@@ -23,69 +56,53 @@ Recommended lightweight model for demonstration: `qwen2.5-coder:1.5b`
 - `Python Docstring Generator: Refresh Local Model Status`
 - `Python Docstring Generator: Show Output Channel`
 
-## Extension Settings
+## Настройки
 
-This extension contributes the following settings:
+- `pythonDocstringGenerator.ollamaUrl`: адрес Ollama API. По умолчанию `http://localhost:11434`.
+- `pythonDocstringGenerator.model`: имя модели Ollama. По умолчанию `qwen2.5-coder:1.5b`.
+- `pythonDocstringGenerator.temperature`: температура генерации от `0` до `2`. По умолчанию `0.2`.
+- `pythonDocstringGenerator.numPredict`: максимум генерируемых токенов. По умолчанию `256`.
+- `pythonDocstringGenerator.autoStartOllama`: пытаться запускать локальный `ollama serve`. По умолчанию `true`.
+- `pythonDocstringGenerator.autoPullModel`: скачивать выбранную модель, если ее нет. По умолчанию `true`.
 
-- `pythonDocstringGenerator.ollamaUrl`: Ollama base URL. Default: `http://localhost:11434`
-- `pythonDocstringGenerator.model`: Ollama model name. Default: `qwen2.5-coder:1.5b`
-- `pythonDocstringGenerator.temperature`: Generation temperature from `0` to `2`. Default: `0.2`
-- `pythonDocstringGenerator.numPredict`: Positive maximum generated token count. Default: `256`
-- `pythonDocstringGenerator.autoStartOllama`: Try to start local `ollama serve` automatically. Default: `true`
-- `pythonDocstringGenerator.autoPullModel`: Download the configured model if it is missing. Default: `true`
+## Использование
 
-## Usage
+1. Установите Ollama, если она еще не установлена.
+2. Запустите `Python Docstring Generator: Setup Local Environment`.
+3. Откройте Python-файл.
+4. Выделите ровно одну полную Python-функцию или метод с single-line `def` или `async def`.
+5. Запустите `Python Docstring Generator: Generate Python Docstring`.
+6. Проверьте preview.
+7. Выберите `Insert`, `Replace`, `Regenerate` или `Cancel`.
 
-1. Install Ollama if it is not installed yet.
-2. Run `Python Docstring Generator: Setup Local Environment` once, or let the generate command prepare the model automatically.
-3. Open a Python file in VS Code.
-4. Select exactly one complete Python function or method with a single-line `def` or `async def` signature.
-5. Run `Python Docstring Generator: Generate Python Docstring`.
+Если функция уже содержит docstring, расширение предложит заменить его через `Replace Existing Docstring`.
 
-The extension rejects selections with multiple functions or surrounding executable code so the model does not switch into code review mode.
+Если выделено несколько функций или лишний исполняемый код вокруг функции, расширение покажет предупреждение и не отправит этот фрагмент в модель.
 
-The extension checks for an existing docstring in the selected function. If the first meaningful line after the function signature is already a triple-quoted string, the extension asks whether to replace it.
+## Status Bar
 
-During setup, the extension:
-
-- checks the configured Ollama URL;
-- starts `ollama serve` for localhost URLs when possible;
-- checks whether the configured model is installed;
-- pulls the model through Ollama `/api/pull` if it is missing;
-- reports progress and technical diagnostics in the `Python Docstring Generator` Output Channel.
-
-## Interactive Demo Features
-
-The extension includes a status bar indicator that shows the local generation state:
+Расширение показывает состояние локального backend в status bar:
 
 - `Docstring: Ready`
 - `Docstring: Offline`
 - `Docstring: Model missing`
 - `Docstring: Downloading`
 - `Docstring: Generating`
+- `Docstring: Checking`
+- `Docstring: Error`
 
-Click the status bar item to open a quick action menu for setup, model selection, connection checks, generation, status refresh, settings, and diagnostics.
+По клику открывается меню действий: setup, выбор модели, проверка соединения, генерация, обновление статуса, настройки и Output Channel.
 
-The setup command writes a step-by-step checklist to the Output Channel and shows the checklist when the environment is ready.
+## Пример
 
-The model selection command reads the installed models from Ollama `/api/tags`, shows them in a Quick Pick list, and saves the selected model to VS Code settings.
-
-Generated docstrings are previewed before insertion. From the preview dialog, you can:
-
-- insert the generated docstring;
-- replace an existing docstring;
-- regenerate another candidate;
-- cancel insertion;
-- open the Output Channel.
-
-Example input:
+До:
 
 ```python
 def add(a, b):
     return a + b
 ```
 
-Example result:
+После:
 
 ```python
 def add(a, b):
@@ -101,6 +118,9 @@ def add(a, b):
     return a + b
 ```
 
-## MVP Limitations
+## Ограничения MVP
 
-The first version is intentionally simple. It focuses on ordinary single-line Python function signatures. Decorators, multiline signatures, complex nested functions, and broader Python syntax handling can be improved later.
+- лучше всего поддерживаются single-line `def` и `async def`;
+- multiline signatures пока ограничены;
+- сложные nested functions и нестандартные случаи Python-синтаксиса требуют дальнейшей доработки;
+- качество docstring зависит от выбранной локальной модели.

@@ -1,4 +1,4 @@
-# Инструкция И Демонстрационный Сценарий
+# Инструкция пользователя и демонстрационный сценарий
 
 ## Назначение
 
@@ -7,62 +7,125 @@
 Основной сценарий:
 
 1. открыть Python-файл;
-2. выделить функцию;
+2. выделить ровно одну функцию или метод;
 3. запустить генерацию;
 4. посмотреть preview;
-5. вставить docstring или сгенерировать другой вариант.
+5. вставить docstring, заменить существующий docstring или сгенерировать другой вариант.
 
 ## Требования
 
-Минимально нужно:
+На компьютере должны быть:
 
-- Visual Studio Code;
-- установленный Ollama;
-- доступ к интернету для первичного скачивания модели, если её ещё нет локально.
+- Visual Studio Code `1.90.0` или новее;
+- Ollama, установленная отдельно;
+- доступ к интернету для первого скачивания модели;
+- свободное место на диске для модели.
 
-Расширение само может:
-
-- запустить локальный Ollama server;
-- скачать выбранную модель;
-- проверить состояние локального backend;
-- показать ошибки и успешные операции.
-
-## Установка Расширения Для Теста
-
-В режиме разработки:
-
-1. Открыть папку:
+Рекомендуемая модель для демонстрации:
 
 ```text
-vscode-extension/python-docstring-generator/
+qwen2.5-coder:1.5b
 ```
 
-2. Установить зависимости:
+Расширение может:
+
+- проверить доступность Ollama API;
+- запустить `ollama serve`, если Ollama уже установлена и доступна в `PATH`;
+- скачать выбранную модель через Ollama `/api/pull`;
+- показать progress, status bar и понятные сообщения об ошибках.
+
+Расширение не устанавливает само приложение Ollama в систему. Если Ollama не установлена, расширение предложит открыть страницу загрузки.
+
+## Установка на другом ПК через VSIX
+
+Передать на другой ПК нужно файл:
+
+```text
+vscode-extension/python-docstring-generator/release/python-docstring-generator-0.0.2.vsix
+```
+
+### Вариант 1: через интерфейс VS Code
+
+1. Открыть VS Code.
+2. Открыть Extensions.
+3. Нажать `...` в правом верхнем углу панели Extensions.
+4. Выбрать `Install from VSIX...`.
+5. Указать файл `python-docstring-generator-0.0.2.vsix`.
+6. Перезапустить VS Code.
+
+### Вариант 2: через терминал
+
+Перейти в папку с `.vsix` и выполнить:
 
 ```bash
-npm install
+code --install-extension python-docstring-generator-0.0.2.vsix
 ```
 
-3. Запустить сборку:
+Если команда `code` недоступна в терминале, установку проще выполнить через интерфейс VS Code.
+
+## Установка Ollama
+
+Ollama устанавливается отдельно:
+
+```text
+https://ollama.com/download
+```
+
+После установки можно проверить доступность:
 
 ```bash
-npm run compile
+ollama --version
 ```
 
-4. Открыть Extension Development Host через VS Code.
+Модель можно скачать вручную:
 
-Для будущей демонстрации можно подготовить `.vsix`, но публикация в Marketplace не требуется для текущего MVP.
+```bash
+ollama pull qwen2.5-coder:1.5b
+```
+
+Или доверить скачивание расширению через команду `Setup Local Environment`.
+
+## Первый запуск после установки
+
+1. Открыть VS Code.
+2. Открыть Command Palette.
+3. Запустить:
+
+```text
+Python Docstring Generator: Setup Local Environment
+```
+
+Команда выполняет подготовку:
+
+- проверяет настройки extension;
+- проверяет доступность Ollama API;
+- пытается запустить `ollama serve` для localhost URL, если сервер не отвечает;
+- проверяет наличие выбранной модели;
+- скачивает модель, если она отсутствует и `autoPullModel` включен;
+- показывает checklist и пишет диагностику в Output Channel.
+
+Ожидаемый успешный checklist:
+
+```text
+[ok] VS Code extension loaded
+[ok] Configuration valid
+[ok] Ollama API reachable
+[ok] Model available
+[ok] Local generation ready
+```
+
+Пункт `Ollama startup` появляется только если расширению действительно пришлось запускать `ollama serve`.
 
 ## Настройки
 
-Основные настройки extension:
+Основные настройки:
 
 - `pythonDocstringGenerator.ollamaUrl` - адрес Ollama API. По умолчанию `http://localhost:11434`.
 - `pythonDocstringGenerator.model` - имя модели. По умолчанию `qwen2.5-coder:1.5b`.
-- `pythonDocstringGenerator.temperature` - температура генерации. По умолчанию `0.2`.
+- `pythonDocstringGenerator.temperature` - температура генерации от `0` до `2`. По умолчанию `0.2`.
 - `pythonDocstringGenerator.numPredict` - максимум генерируемых токенов. По умолчанию `256`.
-- `pythonDocstringGenerator.autoStartOllama` - автоматически запускать Ollama, если он установлен, но не запущен.
-- `pythonDocstringGenerator.autoPullModel` - автоматически скачивать модель, если её нет.
+- `pythonDocstringGenerator.autoStartOllama` - автоматически запускать `ollama serve`, если возможно.
+- `pythonDocstringGenerator.autoPullModel` - автоматически скачивать выбранную модель, если ее нет.
 
 ## Команды
 
@@ -72,59 +135,56 @@ npm run compile
 - `Python Docstring Generator: Generate Python Docstring`
 - `Python Docstring Generator: Regenerate Python Docstring`
 - `Python Docstring Generator: Check Ollama Connection`
+- `Python Docstring Generator: Select Ollama Model`
 - `Python Docstring Generator: Refresh Local Model Status`
 - `Python Docstring Generator: Show Output Channel`
+
+## Выбор модели
+
+Команда:
+
+```text
+Python Docstring Generator: Select Ollama Model
+```
+
+Она получает список моделей из локального Ollama `/api/tags`, показывает Quick Pick и сохраняет выбранную модель в VS Code settings.
+
+Если список пустой, сначала запустите `Setup Local Environment` или скачайте модель вручную:
+
+```bash
+ollama pull qwen2.5-coder:1.5b
+```
 
 ## Status Bar
 
 После запуска VS Code в status bar появляется индикатор:
 
+```text
+Docstring: ...
+```
+
+Возможные состояния:
+
 - `Docstring: Ready` - Ollama доступен, модель установлена;
 - `Docstring: Offline` - Ollama недоступен;
 - `Docstring: Model missing` - сервер доступен, но выбранной модели нет;
 - `Docstring: Downloading` - модель скачивается;
-- `Docstring: Checking` - идёт проверка состояния.
+- `Docstring: Generating` - идет генерация docstring;
+- `Docstring: Checking` - идет проверка состояния;
+- `Docstring: Error` - произошла ошибка.
 
 По клику на status bar открывается меню действий:
 
 - Generate Docstring;
 - Regenerate Docstring;
 - Setup Local Environment;
+- Select Ollama Model;
 - Check Ollama Connection;
 - Refresh Status;
 - Show Output Channel;
 - Open Settings.
 
-## Setup Local Environment
-
-Команда:
-
-```text
-Python Docstring Generator: Setup Local Environment
-```
-
-Она выполняет пошаговую подготовку:
-
-```text
-[ok] VS Code extension loaded
-[ok] Configuration valid
-[ok] Ollama API reachable
-[ok] Ollama startup
-[ok] Model available
-[ok] Local generation ready
-```
-
-Если Ollama не запущен, расширение попробует выполнить:
-
-```bash
-ollama serve
-```
-
-Если модель отсутствует, расширение скачает её через Ollama API `/api/pull`.
-
-Если Ollama не установлен или команда `ollama` недоступна в `PATH`, расширение покажет ошибку и предложит открыть страницу загрузки Ollama.
-
-## Генерация Docstring
+## Генерация docstring
 
 Пример кода:
 
@@ -139,11 +199,7 @@ def add(a, b):
 2. Запустить `Python Docstring Generator: Generate Python Docstring`.
 3. Дождаться проверки окружения и генерации.
 4. Посмотреть preview.
-5. Выбрать:
-   - `Insert`;
-   - `Regenerate`;
-   - `Cancel`;
-   - `Show Output`.
+5. Выбрать `Insert`, `Regenerate`, `Cancel` или `Show Output`.
 
 Пример результата:
 
@@ -161,66 +217,50 @@ def add(a, b):
     return a + b
 ```
 
-## Ручные Сценарии Проверки
+## Замена существующего docstring
 
-### Scenario 1: Ollama Установлен И Модель Есть
+Если функция уже содержит docstring:
 
-Ожидаемый результат:
+```python
+def add(a, b):
+    """Old description."""
+    return a + b
+```
 
-- status bar показывает `Docstring: Ready`;
-- `Check Ollama Connection` сообщает, что модель доступна;
-- генерация работает без дополнительных действий.
+Расширение покажет предупреждение и предложит:
 
-### Scenario 2: Ollama Установлен, Но Не Запущен
+```text
+Replace Existing Docstring
+Cancel
+```
 
-Ожидаемый результат:
+При выборе `Replace Existing Docstring` новый docstring заменит старый.
 
-- setup пытается запустить `ollama serve`;
-- после запуска показывает успешный checklist;
-- status bar переходит в `Ready`.
+## Проверка выделения
 
-### Scenario 3: Модель Не Скачана
+Расширение ожидает, что пользователь выделит ровно одну функцию или метод.
 
-Ожидаемый результат:
+Поддерживается:
 
-- setup показывает скачивание модели;
-- после скачивания модель становится доступной;
-- генерация работает.
+```python
+def add(a, b):
+    return a + b
+```
 
-### Scenario 4: Ollama Не Установлен
+```python
+async def fetch_data(url):
+    return await client.get(url)
+```
 
-Ожидаемый результат:
+```python
+class Calculator:
+    def multiply(self, a, b):
+        return a * b
+```
 
-- пользователь видит понятную ошибку;
-- доступна кнопка открытия страницы загрузки Ollama.
+Если выделить две функции или функцию вместе с лишним исполняемым кодом, расширение не отправит такой фрагмент в модель и покажет предупреждение.
 
-### Scenario 5: Preview И Regenerate
-
-Ожидаемый результат:
-
-- после генерации появляется preview;
-- `Regenerate` создаёт новый вариант;
-- `Insert` вставляет docstring;
-- `Cancel` ничего не меняет в файле.
-
-## Демонстрационный Сценарий Для Защиты
-
-Рекомендуемый порядок показа:
-
-1. Открыть VS Code с установленным extension.
-2. Показать status bar indicator.
-3. Запустить `Setup Local Environment`.
-4. Показать checklist и Output Channel.
-5. Открыть тестовый Python-файл.
-6. Выделить простую функцию.
-7. Запустить генерацию.
-8. Показать preview.
-9. Нажать `Regenerate`, чтобы продемонстрировать интерактивность.
-10. Нажать `Insert`.
-11. Показать итоговый код с docstring.
-12. Кратко объяснить, что код не отправлялся в cloud API.
-
-## Типичные Ошибки И Сообщения
+## Типичные ошибки
 
 - `Ollama URL is empty` - не задан адрес Ollama.
 - `Model name is empty` - не задано имя модели.
@@ -228,12 +268,53 @@ def add(a, b):
 - `Model is not installed` - выбранная модель не найдена.
 - `Request timed out` - Ollama или модель отвечают слишком долго.
 - `The active editor is not a Python file` - открыт не Python-файл.
-- `Select a Python function` - нет выделения.
+- `Select a Python function` - нет подходящего выделения.
+- `Please select exactly one Python function or method` - выделено несколько функций или методов.
 - `This function already appears to have a docstring` - docstring уже найден.
 
-## Ограничения
+Технические детали доступны через Output Channel:
 
-- MVP ориентирован на выделенную функцию;
-- сложные multiline signatures пока ограничены;
-- автоматическая установка самого Ollama не выполняется;
-- качество docstring зависит от выбранной модели.
+```text
+Python Docstring Generator
+```
+
+## Запуск из исходного кода
+
+Для разработки:
+
+```bash
+cd vscode-extension/python-docstring-generator
+npm install
+npm run compile
+npm run lint
+```
+
+Запуск Extension Development Host:
+
+1. открыть папку `vscode-extension/python-docstring-generator/` в VS Code;
+2. нажать `F5`;
+3. в новом окне VS Code проверить команды расширения.
+
+Сборка `.vsix`:
+
+```bash
+npx --yes @vscode/vsce package --out release/python-docstring-generator-0.0.2.vsix
+```
+
+## Демонстрационный сценарий для защиты
+
+1. Открыть VS Code с установленным extension.
+2. Показать status bar indicator.
+3. Запустить `Setup Local Environment`.
+4. Показать checklist и Output Channel.
+5. Запустить `Select Ollama Model` и показать, что модель выбирается из локального списка.
+6. Открыть тестовый Python-файл.
+7. Выделить простую функцию.
+8. Запустить генерацию.
+9. Показать `Docstring: Generating`.
+10. Показать preview.
+11. Нажать `Regenerate`.
+12. Нажать `Insert`.
+13. Показать функцию с новым docstring.
+14. Показать замену существующего docstring.
+15. Кратко объяснить, что код не отправлялся в cloud API.

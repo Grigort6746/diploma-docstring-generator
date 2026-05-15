@@ -2,7 +2,7 @@
   "name": "python-docstring-generator",
   "displayName": "Python Docstring Generator",
   "description": "Generate Python docstrings locally using Ollama models.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
@@ -21,6 +21,7 @@
     "onCommand:python-docstring-generator.checkOllamaConnection",
     "onCommand:python-docstring-generator.setupLocalEnvironment",
     "onCommand:python-docstring-generator.regenerateDocstring",
+    "onCommand:python-docstring-generator.selectModel",
     "onCommand:python-docstring-generator.showStatusMenu",
     "onCommand:python-docstring-generator.refreshStatus",
     "onCommand:python-docstring-generator.showOutput"
@@ -46,6 +47,11 @@
       {
         "command": "python-docstring-generator.regenerateDocstring",
         "title": "Regenerate Python Docstring",
+        "category": "Python Docstring Generator"
+      },
+      {
+        "command": "python-docstring-generator.selectModel",
+        "title": "Select Ollama Model",
         "category": "Python Docstring Generator"
       },
       {

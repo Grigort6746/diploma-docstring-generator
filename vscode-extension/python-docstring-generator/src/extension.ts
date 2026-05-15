@@ -6,6 +6,7 @@ const generateDocstringCommand = 'python-docstring-generator.generateDocstring';
 const checkOllamaConnectionCommand = 'python-docstring-generator.checkOllamaConnection';
 const setupLocalEnvironmentCommand = 'python-docstring-generator.setupLocalEnvironment';
 const regenerateDocstringCommand = 'python-docstring-generator.regenerateDocstring';
+const selectOllamaModelCommand = 'python-docstring-generator.selectModel';
 const showStatusMenuCommand = 'python-docstring-generator.showStatusMenu';
 const refreshStatusCommand = 'python-docstring-generator.refreshStatus';
 const showOutputCommand = 'python-docstring-generator.showOutput';
@@ -43,12 +44,45 @@ interface OllamaPullResponse {
 	error?: unknown;
 }
 
-type StatusBarState = 'unknown' | 'checking' | 'ready' | 'offline' | 'modelMissing' | 'starting' | 'downloading' | 'error';
+type StatusBarState =
+	| 'unknown'
+	| 'checking'
+	| 'ready'
+	| 'offline'
+	| 'modelMissing'
+	| 'starting'
+	| 'downloading'
+	| 'generating'
+	| 'error';
 
-type PreviewChoice = 'Insert' | 'Regenerate' | 'Cancel';
+type PreviewChoice = 'Apply' | 'Regenerate' | 'Cancel';
+type PreviewApplyAction = 'Insert' | 'Replace';
 
 interface GenerateCommandOptions {
 	isRegenerate?: boolean;
+}
+
+interface FunctionSignature {
+	lineOffset: number;
+	indent: string;
+}
+
+interface ExistingDocstringRange {
+	startLineOffset: number;
+	endLineOffset: number;
+}
+
+interface FunctionSelection {
+	signature: FunctionSignature;
+	existingDocstring?: ExistingDocstringRange;
+}
+
+type FunctionSelectionAnalysis =
+	| { ok: true; selection: FunctionSelection }
+	| { ok: false; message: string };
+
+interface ModelQuickPickItem extends vscode.QuickPickItem {
+	modelName: string;
 }
 
 class UserFacingError extends Error {
@@ -144,6 +178,10 @@ export function activate(context: vscode.ExtensionContext) {
 		await runGenerateDocstringCommand({ isRegenerate: true });
 	});
 
+	const selectModelDisposable = vscode.commands.registerCommand(selectOllamaModelCommand, async () => {
+		await runSelectOllamaModelCommand();
+	});
+
 	const checkConnectionDisposable = vscode.commands.registerCommand(checkOllamaConnectionCommand, async () => {
 		await runCheckOllamaConnectionCommand();
 	});
@@ -164,16 +202,25 @@ export function activate(context: vscode.ExtensionContext) {
 		outputChannel?.show();
 	});
 
+	const configurationDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+		if (event.affectsConfiguration('pythonDocstringGenerator')) {
+			log('Python Docstring Generator configuration changed. Refreshing status.');
+			void refreshStatusBar(true);
+		}
+	});
+
 	context.subscriptions.push(
 		outputChannel,
 		statusBarItem,
 		generateDisposable,
 		regenerateDisposable,
+		selectModelDisposable,
 		checkConnectionDisposable,
 		setupDisposable,
 		showStatusMenuDisposable,
 		refreshStatusDisposable,
-		showOutputDisposable
+		showOutputDisposable,
+		configurationDisposable
 	);
 
 	log('Extension activated.');
@@ -198,6 +245,7 @@ function setStatusBarState(state: StatusBarState, detail?: string): void {
 		modelMissing: '$(warning) Docstring: Model missing',
 		starting: '$(debug-start) Docstring: Starting',
 		downloading: '$(cloud-download) Docstring: Downloading',
+		generating: '$(sparkle) Docstring: Generating',
 		error: '$(error) Docstring: Error'
 	};
 
@@ -283,6 +331,11 @@ async function showStatusMenu(): Promise<void> {
 				action: setupLocalEnvironmentCommand
 			},
 			{
+				label: '$(list-selection) Select Ollama Model',
+				description: 'Choose one of the models installed in local Ollama',
+				action: selectOllamaModelCommand
+			},
+			{
 				label: '$(plug) Check Ollama Connection',
 				description: 'Check server and model availability',
 				action: checkOllamaConnectionCommand
@@ -342,17 +395,19 @@ async function runGenerateDocstringCommand(options: GenerateCommandOptions = {})
 		return;
 	}
 
-	const signature = findFunctionSignature(selectedCode);
+	const selectionAnalysis = analyzeSelectedFunction(selectedCode);
 
-	if (!signature) {
-		vscode.window.showWarningMessage('Select a Python function with a single-line def or async def signature.');
+	if (!selectionAnalysis.ok) {
+		vscode.window.showWarningMessage(selectionAnalysis.message);
 		return;
 	}
 
+	const { signature, existingDocstring } = selectionAnalysis.selection;
 	const signatureDocumentLine = editor.selection.start.line + signature.lineOffset;
+	const shouldReplaceExistingDocstring = await confirmExistingDocstringReplacement(existingDocstring);
 
-	if (hasExistingDocstring(selectedCode, signature.lineOffset)) {
-		vscode.window.showWarningMessage('This function already appears to have a docstring.');
+	if (existingDocstring && !shouldReplaceExistingDocstring) {
+		log('Docstring generation cancelled because the selected function already has a docstring.');
 		return;
 	}
 
@@ -380,9 +435,13 @@ async function runGenerateDocstringCommand(options: GenerateCommandOptions = {})
 		while (true) {
 			docstringContent = await generateDocstringCandidate(config, prompt, attempt);
 
-			const previewChoice = await showDocstringPreview(docstringContent, attempt);
+			const previewChoice = await showDocstringPreview(
+				docstringContent,
+				attempt,
+				shouldReplaceExistingDocstring ? 'Replace' : 'Insert'
+			);
 
-			if (previewChoice === 'Insert') {
+			if (previewChoice === 'Apply') {
 				break;
 			}
 
@@ -399,21 +458,24 @@ async function runGenerateDocstringCommand(options: GenerateCommandOptions = {})
 		const signatureIndent = getLineIndent(editor.document.lineAt(signatureDocumentLine).text) || signature.indent;
 		const bodyIndent = signatureIndent + getIndentUnit(editor);
 		const insertionText = formatDocstringForInsertion(docstringContent, bodyIndent);
-		const insertionPosition = new vscode.Position(signatureDocumentLine + 1, 0);
 
-		const applied = await editor.edit((editBuilder) => {
-			editBuilder.insert(insertionPosition, insertionText);
-		});
+		const applied = shouldReplaceExistingDocstring && existingDocstring
+			? await replaceExistingDocstring(editor, existingDocstring, insertionText)
+			: await insertNewDocstring(editor, signatureDocumentLine, insertionText);
 
 		if (!applied) {
-			throw new UserFacingError('Could not insert docstring into the editor.');
+			throw new UserFacingError('Could not apply docstring changes to the editor.');
 		}
 
 		const successChoice = await vscode.window.showInformationMessage(
-			'Python docstring generated and inserted.',
+			shouldReplaceExistingDocstring
+				? 'Python docstring generated and replaced.'
+				: 'Python docstring generated and inserted.',
 			'Regenerate',
 			'Show Output'
 		);
+
+		setStatusBarState('ready', `Model "${config.model}" generated a docstring successfully.`);
 
 		if (successChoice === 'Regenerate') {
 			await vscode.commands.executeCommand(regenerateDocstringCommand);
@@ -517,6 +579,65 @@ async function runSetupLocalEnvironmentCommand(): Promise<void> {
 	}
 }
 
+async function runSelectOllamaModelCommand(): Promise<void> {
+	log('Select Ollama model command started.');
+
+	try {
+		const config = getConfiguration();
+		const modelNames = await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title: 'Loading local Ollama models...',
+				cancellable: false
+			},
+			async (progress) => getOllamaModelsWithAutoStart(config, progress)
+		);
+		const uniqueModelNames = [...new Set(modelNames)].sort((first, second) => first.localeCompare(second));
+
+		if (uniqueModelNames.length === 0) {
+			const choice = await vscode.window.showWarningMessage(
+				'No Ollama models are installed locally.',
+				'Setup Local Environment',
+				'Show Output'
+			);
+
+			if (choice === 'Setup Local Environment') {
+				await runSetupLocalEnvironmentCommand();
+			}
+
+			if (choice === 'Show Output') {
+				outputChannel?.show();
+			}
+
+			return;
+		}
+
+		const items: ModelQuickPickItem[] = uniqueModelNames.map((modelName) => ({
+			label: modelName === config.model ? `$(check) ${modelName}` : modelName,
+			description: modelName === config.model ? 'Current model' : undefined,
+			modelName
+		}));
+		const picked = await vscode.window.showQuickPick(items, {
+			placeHolder: 'Select an Ollama model installed on this computer'
+		});
+
+		if (!picked) {
+			log('Model selection cancelled by user.');
+			return;
+		}
+
+		await vscode.workspace
+			.getConfiguration('pythonDocstringGenerator')
+			.update('model', picked.modelName, vscode.ConfigurationTarget.Global);
+
+		setStatusBarState('ready', `Selected local model "${picked.modelName}".`);
+		log(`Selected Ollama model "${picked.modelName}".`);
+		vscode.window.showInformationMessage(`Selected Ollama model: ${picked.modelName}.`);
+	} catch (error) {
+		handleCommandError('Could not select an Ollama model.', error);
+	}
+}
+
 function getConfiguration(): ExtensionConfiguration {
 	const configuration = vscode.workspace.getConfiguration('pythonDocstringGenerator');
 	const ollamaUrlValue = configuration.get<unknown>('ollamaUrl', 'http://localhost:11434');
@@ -594,6 +715,7 @@ function generatePrompt(code: string): string {
 		'- Return only the docstring.',
 		'- Do not include Markdown.',
 		'- Do not repeat the code.',
+		'- Do not suggest improvements or review the code.',
 		'- Document all visible arguments.',
 		'- Include Returns if the function returns a value.',
 		'- Include Raises only if the function clearly raises exceptions.',
@@ -610,13 +732,20 @@ async function generateDocstringCandidate(
 	prompt: string,
 	attempt: number
 ): Promise<string> {
+	setStatusBarState('generating', `Generating with local model "${config.model}".`);
+
 	const generatedText = await vscode.window.withProgress(
 		{
 			location: vscode.ProgressLocation.Notification,
-			title: attempt === 1 ? 'Generating Python docstring...' : `Regenerating Python docstring (${attempt})...`,
+			title: attempt === 1
+				? `Generating Python docstring with ${config.model}...`
+				: `Regenerating Python docstring with ${config.model} (${attempt})...`,
 			cancellable: false
 		},
-		async () => callOllama(config, prompt)
+		async (progress) => {
+			progress.report({ message: 'Sending the selected function to local Ollama...' });
+			return callOllama(config, prompt);
+		}
 	);
 
 	log('Raw model response before normalization:');
@@ -630,19 +759,24 @@ async function generateDocstringCandidate(
 
 	log(`Generated docstring candidate ${attempt}:`);
 	log(docstringContent);
+	setStatusBarState('ready', `Generated a docstring with "${config.model}".`);
 
 	return docstringContent;
 }
 
-async function showDocstringPreview(docstringContent: string, attempt: number): Promise<PreviewChoice> {
+async function showDocstringPreview(
+	docstringContent: string,
+	attempt: number,
+	applyAction: PreviewApplyAction
+): Promise<PreviewChoice> {
 	while (true) {
 		const choice = await vscode.window.showInformationMessage(
 			attempt === 1 ? 'Generated docstring preview' : `Generated docstring preview (${attempt})`,
 			{
 				modal: true,
-				detail: formatDocstringPreviewDetail(docstringContent)
+				detail: formatDocstringPreviewDetail(docstringContent, applyAction)
 			},
-			'Insert',
+			applyAction,
 			'Regenerate',
 			'Cancel',
 			'Show Output'
@@ -657,17 +791,19 @@ async function showDocstringPreview(docstringContent: string, attempt: number): 
 			return 'Regenerate';
 		}
 
-		if (choice === 'Insert') {
-			return 'Insert';
+		if (choice === applyAction) {
+			return 'Apply';
 		}
 
 		return 'Cancel';
 	}
 }
 
-function formatDocstringPreviewDetail(docstringContent: string): string {
+function formatDocstringPreviewDetail(docstringContent: string, applyAction: PreviewApplyAction): string {
 	return [
-		'The generated docstring will be inserted into the selected function:',
+		applyAction === 'Replace'
+			? 'The generated docstring will replace the existing docstring:'
+			: 'The generated docstring will be inserted into the selected function:',
 		'',
 		'"""',
 		docstringContent,
@@ -1120,30 +1256,179 @@ function isPythonDocument(document: vscode.TextDocument): boolean {
 	return document.languageId === 'python' || document.fileName.toLowerCase().endsWith('.py');
 }
 
-function findFunctionSignature(code: string): { lineOffset: number; indent: string } | undefined {
+function analyzeSelectedFunction(code: string): FunctionSelectionAnalysis {
 	const lines = code.split(/\r?\n/);
+	const signatures = findFunctionSignatures(lines);
+
+	if (signatures.length === 0) {
+		return {
+			ok: false,
+			message: 'Select a Python function with a single-line def or async def signature.'
+		};
+	}
+
+	if (signatures.length > 1) {
+		return {
+			ok: false,
+			message: 'Please select exactly one Python function or method.'
+		};
+	}
+
+	const signature = signatures[0];
+	const surroundingContextMessage = validateContextBeforeFunction(lines, signature)
+		?? validateFunctionBodySelection(lines, signature);
+
+	if (surroundingContextMessage) {
+		return {
+			ok: false,
+			message: surroundingContextMessage
+		};
+	}
+
+	return {
+		ok: true,
+		selection: {
+			signature,
+			existingDocstring: findExistingDocstringRange(lines, signature.lineOffset)
+		}
+	};
+}
+
+function findFunctionSignatures(lines: string[]): FunctionSignature[] {
+	const signatures: FunctionSignature[] = [];
 
 	for (let index = 0; index < lines.length; index += 1) {
-		const line = lines[index];
-		const match = /^(\s*)(?:async\s+def|def)\s+.+:\s*(?:#.*)?$/.exec(line);
+		const match = /^(\s*)(?:async\s+def|def)\s+\w+\s*\(.*\)\s*(?:->\s*[^#]+)?\s*:\s*(?:#.*)?$/.exec(lines[index]);
 
 		if (match) {
-			return {
+			signatures.push({
 				lineOffset: index,
 				indent: match[1]
-			};
+			});
 		}
+	}
+
+	return signatures;
+}
+
+function validateContextBeforeFunction(lines: string[], signature: FunctionSignature): string | undefined {
+	for (let index = 0; index < signature.lineOffset; index += 1) {
+		const line = lines[index];
+		const trimmedLine = line.trim();
+
+		if (!trimmedLine || trimmedLine.startsWith('#')) {
+			continue;
+		}
+
+		if (isDecoratorLine(line, signature.indent) || isAllowedClassWrapperLine(line, signature.indent)) {
+			continue;
+		}
+
+		return 'Please select only one Python function or method, without surrounding executable code.';
 	}
 
 	return undefined;
 }
 
-function hasExistingDocstring(code: string, signatureLineOffset: number): boolean {
-	const lines = code.split(/\r?\n/);
+function validateFunctionBodySelection(lines: string[], signature: FunctionSignature): string | undefined {
+	let hasBodyLine = false;
+
+	for (let index = signature.lineOffset + 1; index < lines.length; index += 1) {
+		const line = lines[index];
+		const trimmedLine = line.trim();
+
+		if (!trimmedLine) {
+			continue;
+		}
+
+		if (getLineIndent(line).length <= signature.indent.length) {
+			return 'Please select only the target function body, without code after the function.';
+		}
+
+		hasBodyLine = true;
+	}
+
+	if (!hasBodyLine) {
+		return 'Select the complete Python function body before generating a docstring.';
+	}
+
+	return undefined;
+}
+
+function isDecoratorLine(line: string, signatureIndent: string): boolean {
+	return getLineIndent(line) === signatureIndent && line.trim().startsWith('@');
+}
+
+function isAllowedClassWrapperLine(line: string, signatureIndent: string): boolean {
+	const trimmedLine = line.trim();
+
+	if (!/^class\s+\w+.*:\s*(?:#.*)?$/.test(trimmedLine)) {
+		return false;
+	}
+
+	return getLineIndent(line).length < signatureIndent.length;
+}
+
+async function confirmExistingDocstringReplacement(
+	existingDocstring: ExistingDocstringRange | undefined
+): Promise<boolean> {
+	if (!existingDocstring) {
+		return false;
+	}
+
+	const choice = await vscode.window.showWarningMessage(
+		'This function already appears to have a docstring.',
+		'Replace Existing Docstring',
+		'Cancel'
+	);
+
+	return choice === 'Replace Existing Docstring';
+}
+
+async function insertNewDocstring(
+	editor: vscode.TextEditor,
+	signatureDocumentLine: number,
+	insertionText: string
+): Promise<boolean> {
+	const insertionPosition = new vscode.Position(signatureDocumentLine + 1, 0);
+
+	return editor.edit((editBuilder) => {
+		editBuilder.insert(insertionPosition, insertionText);
+	});
+}
+
+async function replaceExistingDocstring(
+	editor: vscode.TextEditor,
+	existingDocstring: ExistingDocstringRange,
+	insertionText: string
+): Promise<boolean> {
+	const startLine = editor.selection.start.line + existingDocstring.startLineOffset;
+	const endLine = editor.selection.start.line + existingDocstring.endLineOffset;
+	const replacementRange = getFullLineRange(editor.document, startLine, endLine);
+
+	return editor.edit((editBuilder) => {
+		editBuilder.replace(replacementRange, insertionText);
+	});
+}
+
+function getFullLineRange(document: vscode.TextDocument, startLine: number, endLine: number): vscode.Range {
+	const start = new vscode.Position(startLine, 0);
+
+	if (endLine + 1 < document.lineCount) {
+		return new vscode.Range(start, new vscode.Position(endLine + 1, 0));
+	}
+
+	return new vscode.Range(start, document.lineAt(endLine).rangeIncludingLineBreak.end);
+}
+
+function findExistingDocstringRange(
+	lines: string[],
+	signatureLineOffset: number
+): ExistingDocstringRange | undefined {
 	const signatureLine = lines[signatureLineOffset];
 
 	if (!signatureLine) {
-		return false;
+		return undefined;
 	}
 
 	const signatureIndent = getLineIndent(signatureLine);
@@ -1157,13 +1442,50 @@ function hasExistingDocstring(code: string, signatureLineOffset: number): boolea
 		}
 
 		if (getLineIndent(line).length <= signatureIndent.length) {
-			return false;
+			return undefined;
 		}
 
-		return trimmedLine.startsWith('"""') || trimmedLine.startsWith("'''");
+		const quoteStyle = getOpeningTripleQuote(trimmedLine);
+
+		if (!quoteStyle) {
+			return undefined;
+		}
+
+		return {
+			startLineOffset: index,
+			endLineOffset: findDocstringEndLine(lines, index, quoteStyle)
+		};
 	}
 
-	return false;
+	return undefined;
+}
+
+function getOpeningTripleQuote(trimmedLine: string): string | undefined {
+	if (trimmedLine.startsWith('"""')) {
+		return '"""';
+	}
+
+	if (trimmedLine.startsWith("'''")) {
+		return "'''";
+	}
+
+	return undefined;
+}
+
+function findDocstringEndLine(lines: string[], startLineOffset: number, quoteStyle: string): number {
+	const firstLineAfterOpeningQuote = lines[startLineOffset].trim().slice(quoteStyle.length);
+
+	if (firstLineAfterOpeningQuote.includes(quoteStyle)) {
+		return startLineOffset;
+	}
+
+	for (let index = startLineOffset + 1; index < lines.length; index += 1) {
+		if (lines[index].includes(quoteStyle)) {
+			return index;
+		}
+	}
+
+	return startLineOffset;
 }
 
 function getIndentUnit(editor: vscode.TextEditor): string {

@@ -19,6 +19,7 @@ Recommended lightweight model for demonstration: `qwen2.5-coder:1.5b`
 - `Python Docstring Generator: Regenerate Python Docstring`
 - `Python Docstring Generator: Check Ollama Connection`
 - `Python Docstring Generator: Setup Local Environment`
+- `Python Docstring Generator: Select Ollama Model`
 - `Python Docstring Generator: Refresh Local Model Status`
 - `Python Docstring Generator: Show Output Channel`
 
@@ -38,10 +39,12 @@ This extension contributes the following settings:
 1. Install Ollama if it is not installed yet.
 2. Run `Python Docstring Generator: Setup Local Environment` once, or let the generate command prepare the model automatically.
 3. Open a Python file in VS Code.
-4. Select a complete Python function with a single-line `def` or `async def` signature.
+4. Select exactly one complete Python function or method with a single-line `def` or `async def` signature.
 5. Run `Python Docstring Generator: Generate Python Docstring`.
 
-The extension checks for an existing docstring in the selected function and skips insertion if the first meaningful line after the function signature is already a triple-quoted string.
+The extension rejects selections with multiple functions or surrounding executable code so the model does not switch into code review mode.
+
+The extension checks for an existing docstring in the selected function. If the first meaningful line after the function signature is already a triple-quoted string, the extension asks whether to replace it.
 
 During setup, the extension:
 
@@ -59,14 +62,18 @@ The extension includes a status bar indicator that shows the local generation st
 - `Docstring: Offline`
 - `Docstring: Model missing`
 - `Docstring: Downloading`
+- `Docstring: Generating`
 
-Click the status bar item to open a quick action menu for setup, connection checks, generation, status refresh, settings, and diagnostics.
+Click the status bar item to open a quick action menu for setup, model selection, connection checks, generation, status refresh, settings, and diagnostics.
 
 The setup command writes a step-by-step checklist to the Output Channel and shows the checklist when the environment is ready.
+
+The model selection command reads the installed models from Ollama `/api/tags`, shows them in a Quick Pick list, and saves the selected model to VS Code settings.
 
 Generated docstrings are previewed before insertion. From the preview dialog, you can:
 
 - insert the generated docstring;
+- replace an existing docstring;
 - regenerate another candidate;
 - cancel insertion;
 - open the Output Channel.
@@ -96,4 +103,4 @@ def add(a, b):
 
 ## MVP Limitations
 
-The first version is intentionally simple. It focuses on ordinary single-line Python function signatures. Decorators, multiline signatures, advanced existing-docstring replacement, and broader Python syntax handling can be improved later.
+The first version is intentionally simple. It focuses on ordinary single-line Python function signatures. Decorators, multiline signatures, complex nested functions, and broader Python syntax handling can be improved later.
